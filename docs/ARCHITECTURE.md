@@ -63,16 +63,18 @@ Git operations are shared; the PR/MR layer is per provider behind one interface 
 public interface IRepositoryProvider
 {
     ProviderCapabilities Capabilities { get; }
+    Task<string> GetCurrentUserAsync(CancellationToken ct);
     IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct);
     IAsyncEnumerable<PullRequestRef> ListCandidatesAsync(RepoRef repo, TriggerFilter filter, CancellationToken ct);
     Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct);
     Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct);
     Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct);
     Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, CancellationToken ct);
-    Task SetDecisionAsync(PullRequestRef pr, ReviewDecision decision, CancellationToken ct);
     Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct);
 }
 ```
+
+`PublishReviewAsync` posts the summary, inline comments and decision together, bound to the reviewed head SHA, so an approval never covers commits pushed after the review. `GetCurrentUserAsync` returns the token owner for the self-PR rule.
 
 `PullRequestSnapshot` carries head/base SHAs, author, assignees, requested reviewers, labels, draft flag, CI state and mergeability. Each adapter maps its own model into it.
 

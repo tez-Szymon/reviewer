@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <ItemGroup>
     <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Reviewer.Providers.GitHub.Tests" />
+  </ItemGroup>
+
 </Project>
