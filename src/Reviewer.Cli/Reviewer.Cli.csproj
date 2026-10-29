@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>reviewer</AssemblyName>
+    <RootNamespace>Reviewer.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
+    <ProjectReference Include="..\Reviewer.Git\Reviewer.Git.csproj" />
+    <ProjectReference Include="..\Reviewer.Providers.GitHub\Reviewer.Providers.GitHub.csproj" />
+    <ProjectReference Include="..\Reviewer.Agents.Cli\Reviewer.Agents.Cli.csproj" />
+    <ProjectReference Include="..\Reviewer.Instructions\Reviewer.Instructions.csproj" />
+  </ItemGroup>
+
+</Project>

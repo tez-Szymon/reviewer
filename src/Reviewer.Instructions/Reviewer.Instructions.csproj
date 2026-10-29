@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\**\*.md" LogicalName="Reviewer.Instructions.%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

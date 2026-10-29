@@ -6,7 +6,7 @@ A local-first, per-person AI code reviewer. A .NET engine on your machine polls 
 
 ## Status
 
-Design stage. Nothing is implemented yet. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
+M1 scaffolding: the solution, project layout and core contracts are in place; the review loop itself is not implemented yet. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
 
 | Milestone | Scope |
 |---|---|
@@ -14,6 +14,16 @@ Design stage. Nothing is implemented yet. See [docs/ARCHITECTURE.md](docs/ARCHIT
 | M2 · Engine, automation | Polling, triggers, job queue, SQLite state, delta review, local API |
 | M3 · Desktop and GitLab | Avalonia app, GitLab (incl. self-hosted), Codex, OS keychain, `gate-merge` |
 | M4 · API agents, release | `Microsoft.Extensions.AI` agents, signed installers, auto-update, eval set |
+
+## Build
+
+Requires the .NET 10 SDK.
+
+```bash
+dotnet build Reviewer.slnx
+dotnet test Reviewer.slnx
+dotnet run --project src/Reviewer.Cli -- --help
+```
 
 ## License
 

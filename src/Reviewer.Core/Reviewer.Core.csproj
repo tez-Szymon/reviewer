@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <EmbeddedResource Include="Findings\findings.schema.json" LogicalName="Reviewer.Core.findings.schema.json" />
+  </ItemGroup>
+
+</Project>
