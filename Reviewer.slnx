@@ -8,6 +8,7 @@
     <Project Path="src/Reviewer.Providers.GitHub/Reviewer.Providers.GitHub.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Reviewer.Agents.Cli.Tests/Reviewer.Agents.Cli.Tests.csproj" />
     <Project Path="tests/Reviewer.Core.Tests/Reviewer.Core.Tests.csproj" />
   </Folder>
 </Solution>
