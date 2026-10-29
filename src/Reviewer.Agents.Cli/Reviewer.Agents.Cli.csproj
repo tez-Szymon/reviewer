@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="CliWrap" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FindingsReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "category", "confidence", "file", "startLine", "endLine", "title", "body"],
+        "properties": {
+          "id": { "type": "string" },
+          "severity": { "enum": ["blocker", "major", "minor", "nit"] },
+          "category": { "enum": ["security", "correctness", "performance", "tests", "maintainability", "style", "docs"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "file": { "type": "string" },
+          "startLine": { "type": "integer", "minimum": 1 },
+          "endLine": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "suggestion": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}
