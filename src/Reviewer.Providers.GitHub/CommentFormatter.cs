@@ -47,6 +47,9 @@ internal static partial class CommentFormatter
         return Truncate(body.ToString());
     }
 
+    /// <summary>A short note from the engine, e.g. why a thread was resolved. No marker: it's not a finding.</summary>
+    public static string Note(string text) => Truncate(Defuse(text));
+
     public static string? ParseFingerprint(string body)
     {
         var match = MarkerPattern().Match(body);

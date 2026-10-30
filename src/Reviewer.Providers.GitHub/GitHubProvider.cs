@@ -8,8 +8,8 @@ using Reviewer.Core.Providers;
 namespace Reviewer.Providers.GitHub;
 
 /// <summary>
-/// GitHub REST adapter. M1 scope: current user, snapshot, own comments, publish review, merge.
-/// Repo listing, candidate polling and thread resolution come with the engine in M2.
+/// GitHub adapter: REST for PRs, reviews and comments; GraphQL for review threads, which REST doesn't expose.
+/// Repo listing and candidate polling come with the scheduler.
 /// </summary>
 public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
 {
@@ -20,6 +20,27 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
+
+    private static readonly JsonSerializerOptions GraphQlJson = new(JsonSerializerDefaults.Web);
+
+    private const string ThreadsQuery = """
+        query($owner: String!, $name: String!, $number: Int!, $after: String) {
+          repository(owner: $owner, name: $name) {
+            pullRequest(number: $number) {
+              reviewThreads(first: 100, after: $after) {
+                pageInfo { hasNextPage endCursor }
+                nodes { id isResolved comments(first: 1) { nodes { databaseId } } }
+              }
+            }
+          }
+        }
+        """;
+
+    private const string ResolveMutation = """
+        mutation($threadId: ID!) {
+          resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
+        }
+        """;
 
     private static readonly HashSet<string> FailedConclusions = ["failure", "cancelled", "timed_out", "action_required", "stale"];
 
@@ -87,7 +108,14 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
             }
         }
 
-        return result;
+        if (result.Count == 0)
+        {
+            return result;
+        }
+
+        // Our comments open their threads, so a thread's first comment identifies it.
+        var threads = await GetThreadsAsync(pr, ct).ConfigureAwait(false);
+        return [.. result.Select(c => threads.TryGetValue(c.ProviderId, out var t) ? c with { IsResolved = t.IsResolved } : c)];
     }
 
     public async Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct)
@@ -125,8 +153,69 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
         await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
     }
 
-    public Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, CancellationToken ct) =>
-        throw new NotImplementedException("Thread resolution comes with re-review in M2.");
+    public async Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct)
+    {
+        var threads = await GetThreadsAsync(pr, ct).ConfigureAwait(false);
+        if (!threads.TryGetValue(comment.ProviderId, out var thread))
+        {
+            throw new GitHubApiException(HttpStatusCode.NotFound, $"No review thread starts with comment {comment.ProviderId}.");
+        }
+
+        if (thread.IsResolved)
+        {
+            return; // Someone resolved it already; a late note would only add noise.
+        }
+
+        using (var reply = await _http.PostAsJsonAsync(
+            $"{PullPath(pr)}/comments/{Uri.EscapeDataString(comment.ProviderId)}/replies", new ReplyRequest(CommentFormatter.Note(note)), Json, ct)
+            .ConfigureAwait(false))
+        {
+            await EnsureSuccessAsync(reply, ct).ConfigureAwait(false);
+        }
+
+        await GraphQlAsync<ResolveData>(ResolveMutation, new { threadId = thread.Id }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Review threads by the REST id of their first comment.</summary>
+    private async Task<Dictionary<string, ThreadNode>> GetThreadsAsync(PullRequestRef pr, CancellationToken ct)
+    {
+        var threads = new Dictionary<string, ThreadNode>(StringComparer.Ordinal);
+        string? after = null;
+        do
+        {
+            var data = await GraphQlAsync<ThreadsData>(
+                ThreadsQuery, new { owner = pr.Repo.Owner, name = pr.Repo.Name, number = pr.Number, after }, ct).ConfigureAwait(false);
+            var connection = data.Repository?.PullRequest?.ReviewThreads
+                ?? throw new GitHubApiException(HttpStatusCode.NotFound, $"Pull request {pr.Repo}#{pr.Number} not found.");
+            foreach (var thread in connection.Nodes)
+            {
+                if (thread.Comments.Nodes is [{ DatabaseId: { } id }, ..])
+                {
+                    threads[id.ToString(System.Globalization.CultureInfo.InvariantCulture)] = thread;
+                }
+            }
+
+            after = connection.PageInfo.HasNextPage ? connection.PageInfo.EndCursor : null;
+        }
+        while (after is not null);
+
+        return threads;
+    }
+
+    // GraphQL reports most failures as 200 with an "errors" array.
+    private async Task<T> GraphQlAsync<T>(string query, object variables, CancellationToken ct)
+        where T : class
+    {
+        using var response = await _http.PostAsJsonAsync("graphql", new GraphQlRequest(query, variables), GraphQlJson, ct).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+        var result = await response.Content.ReadFromJsonAsync<GraphQlResponse<T>>(GraphQlJson, ct).ConfigureAwait(false);
+        if (result?.Errors is { Count: > 0 } errors)
+        {
+            throw new GitHubApiException(HttpStatusCode.OK, string.Join("; ", errors.Select(e => e.Message)));
+        }
+
+        return result?.Data ?? throw new GitHubApiException(response.StatusCode, "Empty GraphQL response.");
+    }
 
     public async Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct)
     {

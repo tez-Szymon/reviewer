@@ -25,6 +25,7 @@ public sealed record ReviewRequest(
 /// <param name="Skipped">Nothing new since the last review, so the agent wasn't run; <see cref="Delta"/> says why.</param>
 /// <param name="Resolved">Earlier findings this review found fixed.</param>
 /// <param name="StillOpen">Earlier findings that are still open, whether or not they were reported again.</param>
+/// <param name="Dismissed">Earlier findings whose thread a person resolved on the PR; they no longer block.</param>
 public sealed record ReviewOutcome(
     string JobId,
     string? AttemptFolder,
@@ -35,7 +36,12 @@ public sealed record ReviewOutcome(
     bool Published,
     bool Skipped = false,
     int Resolved = 0,
-    int StillOpen = 0);
+    int StillOpen = 0,
+    int Dismissed = 0)
+{
+    /// <summary>Things that went wrong after the review was published, such as a thread that couldn't be resolved.</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+}
 
 /// <summary>
 /// One review from start to finish: snapshot, delta, context, agent, policy, publish. The agent's findings reach the PR
@@ -43,8 +49,9 @@ public sealed record ReviewOutcome(
 /// </summary>
 /// <remarks>
 /// A re-review covers only what's new, so findings from earlier reviews are tracked here. One whose lines changed and
-/// that wasn't reported again is resolved. Any other stays open, isn't posted again, and if it was blocking it keeps
-/// blocking: approving needs every blocker fixed, not only the ones in the latest delta.
+/// that wasn't reported again is fixed, and its thread is resolved with a note. One whose thread a person resolved is
+/// dismissed. Any other stays open, isn't posted again, and if it was blocking it keeps blocking: approving needs
+/// every blocker fixed or dismissed, not only the ones in the latest delta.
 /// </remarks>
 public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuilder builder, IReviewAgent agent, ReviewStore store)
 {
@@ -127,41 +134,78 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             fingerprints[finding] = FindingFingerprint.Compute(finding, snippet);
         }
 
-        // Earlier findings are fixed when their lines changed and the agent didn't report them again; the rest stay open.
-        // Open blockers block even when reported again: a re-report outside this delta wouldn't block by itself.
+        // Earlier findings are fixed when their lines changed and the agent didn't report them again, and dismissed when
+        // a person resolved their thread on the PR; the rest stay open. Open blockers block even when reported again:
+        // a re-report outside this delta wouldn't block by itself.
         var open = await store.GetOpenFindingsAsync(pr, ct).ConfigureAwait(false);
+        var own = await provider.GetOwnCommentsAsync(pr, ct).ConfigureAwait(false);
+        var resolvedOnPr = own.Where(c => c.IsResolved).Select(c => c.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        var dismissed = open.Where(o => resolvedOnPr.Contains(o.Fingerprint)).Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
         var reported = fingerprints.Values.ToHashSet(StringComparer.Ordinal);
         var touched = await builder.FindTouchedAsync(open, snapshot.HeadSha, ct).ConfigureAwait(false);
-        var resolved = open.Where(o => !reported.Contains(o.Fingerprint) && touched.Contains(o.Fingerprint)).Select(o => o.Fingerprint).ToList();
-        var stillOpen = open.Where(o => !resolved.Contains(o.Fingerprint)).ToList();
+        var fixedFingerprints = open
+            .Where(o => !dismissed.Contains(o.Fingerprint) && !reported.Contains(o.Fingerprint) && touched.Contains(o.Fingerprint))
+            .Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        var stillOpen = open.Where(o => !dismissed.Contains(o.Fingerprint) && !fixedFingerprints.Contains(o.Fingerprint)).ToList();
 
+        // A person's call stands: a dismissed finding reported again doesn't block. It's kept in the report, so history
+        // shows it, as dropped.
+        var considered = report with { Findings = [.. report.Findings.Where(f => !dismissed.Contains(fingerprints[f]))] };
         var plan = PolicyEngine.Decide(
-            report, snapshot, request.Policy, provider.Capabilities, prepared.Scope, [.. stillOpen.Where(o => o.Blocking).Select(o => o.Finding)]);
+            considered, snapshot, request.Policy, provider.Capabilities, prepared.Scope, [.. stillOpen.Where(o => o.Blocking).Select(o => o.Finding)]);
+        if (considered.Findings.Count < report.Findings.Count)
+        {
+            plan = plan with { Reasons = [.. plan.Reasons, $"Ignored {report.Findings.Count - considered.Findings.Count} finding(s) whose thread a person resolved."] };
+        }
 
         // Don't post what the PR already has: comments with our fingerprint marker, and findings from earlier summaries.
-        var posted = (await provider.GetOwnCommentsAsync(pr, ct).ConfigureAwait(false)).Select(c => c.Fingerprint)
-            .Concat(open.Select(o => o.Fingerprint))
-            .ToHashSet(StringComparer.Ordinal);
+        var posted = own.Select(c => c.Fingerprint).Concat(open.Select(o => o.Fingerprint)).ToHashSet(StringComparer.Ordinal);
         plan = WithoutPosted(plan, fingerprints, posted);
+        if (provider.Capabilities.SupportsThreadResolve)
+        {
+            plan = plan with { CommentsToResolve = [.. own.Where(c => !c.IsResolved && fixedFingerprints.Contains(c.Fingerprint))] };
+        }
+
         await File.WriteAllTextAsync(Path.Combine(attempt, PlanFile), JsonSerializer.Serialize(plan, PlanJson), ct)
             .ConfigureAwait(false);
 
         var published = !request.Policy.DryRun;
+        var warnings = new List<string>();
         if (published)
         {
+            var head = prepared.Scope.ReviewedHeadSha;
             // Merging is gate-merge only, which comes in M3; until then the plan never asks for it.
             var result = new ReviewResult(
-                $"{plan.Summary}\n\n{Footer(delta, prepared.Scope.ReviewedHeadSha, resolved.Count, stillOpen.Count, plan.OpenBlockingFindings.Count)}",
+                $"{plan.Summary}\n\n{Footer(delta, head, fixedFingerprints.Count, dismissed.Count, stillOpen.Count, plan.OpenBlockingFindings.Count)}",
                 [.. plan.InlineFindings.Select(f => new InlineComment(f, fingerprints[f]))],
                 plan.SummaryFindings,
                 plan.Decision,
-                prepared.Scope.ReviewedHeadSha);
+                head);
             await provider.PublishReviewAsync(pr, result, ct).ConfigureAwait(false);
             await builder.KeepReviewedHeadAsync(pr, snapshot.HeadSha, CancellationToken.None).ConfigureAwait(false);
+
+            // After the review, so a failure here can't lose it. The finding is fixed either way; only the thread stays open.
+            foreach (var comment in plan.CommentsToResolve)
+            {
+                try
+                {
+                    await provider.ResolveCommentAsync(
+                        pr, comment, $"Fixed in {Short(head)}: this code changed and the review didn't find the issue again.", ct).ConfigureAwait(false);
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    warnings.Add($"Couldn't resolve the thread at {comment.File}:{comment.Line}: {e.Message}");
+                }
+            }
         }
 
-        var outcome = new ReviewOutcome(jobId, attempt, snapshot, delta, report, plan, published, Resolved: resolved.Count, StillOpen: stillOpen.Count);
-        await store.CompleteJobAsync(jobId, outcome, fingerprints, deltaPlan.Current, resolved, CancellationToken.None).ConfigureAwait(false);
+        var outcome = new ReviewOutcome(
+            jobId, attempt, snapshot, delta, report, plan, published,
+            Resolved: fixedFingerprints.Count, StillOpen: stillOpen.Count, Dismissed: dismissed.Count)
+        {
+            Warnings = warnings,
+        };
+        await store.CompleteJobAsync(jobId, outcome, fingerprints, deltaPlan.Current, [.. fixedFingerprints, .. dismissed], CancellationToken.None).ConfigureAwait(false);
         return outcome;
     }
 
@@ -181,13 +225,18 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             };
     }
 
-    private string Footer(ReviewDelta delta, string head, int resolved, int stillOpen, int openBlocking)
+    private string Footer(ReviewDelta delta, string head, int fixedCount, int dismissed, int stillOpen, int openBlocking)
     {
         var scope = delta.Kind == DeltaKind.Full ? "" : $" ({delta.Reason.TrimEnd('.').ToLowerInvariant()})";
         var notes = new List<string> { $"Reviewed {Short(head)}{scope} with {agent.Id}." };
-        if (resolved > 0)
+        if (fixedCount > 0)
         {
-            notes.Add($"{resolved} earlier finding(s) fixed.");
+            notes.Add($"{fixedCount} earlier finding(s) fixed.");
+        }
+
+        if (dismissed > 0)
+        {
+            notes.Add($"{dismissed} dismissed on the PR.");
         }
 
         if (stillOpen > 0)

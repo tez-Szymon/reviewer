@@ -47,9 +47,19 @@ internal static class ReviewPrinter
             }
         }
 
-        if (outcome.Resolved > 0 || outcome.StillOpen > 0)
+        if (outcome.Resolved > 0 || outcome.Dismissed > 0 || outcome.StillOpen > 0)
         {
-            output.WriteLine($"Earlier findings: {outcome.Resolved} fixed, {outcome.StillOpen} still open ({plan.OpenBlockingFindings.Count} blocking).");
+            output.WriteLine(
+                $"Earlier findings: {outcome.Resolved} fixed, {outcome.Dismissed} dismissed on the PR, {outcome.StillOpen} still open ({plan.OpenBlockingFindings.Count} blocking).");
+        }
+
+        if (plan.CommentsToResolve.Count > 0)
+        {
+            output.WriteLine($"Threads {(outcome.Published ? "resolved" : "to resolve")} ({plan.CommentsToResolve.Count}):");
+            foreach (var comment in plan.CommentsToResolve)
+            {
+                output.WriteLine($"  {comment.File}:{comment.Line}");
+            }
         }
 
         var dropped = outcome.Report.Findings.Count - plan.InlineFindings.Count - plan.SummaryFindings.Count - plan.AlreadyPosted.Count;
@@ -62,6 +72,10 @@ internal static class ReviewPrinter
 
         output.WriteLine();
         output.WriteLine(outcome.Published ? "Published to the pull request." : "Dry run: nothing was published.");
+        foreach (var warning in outcome.Warnings)
+        {
+            output.WriteLine($"Warning: {warning}");
+        }
         output.WriteLine($"Job folder: {outcome.AttemptFolder}");
     }
 

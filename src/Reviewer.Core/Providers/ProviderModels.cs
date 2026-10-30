@@ -49,7 +49,8 @@ public sealed record TriggerFilter(
     IReadOnlyList<string> TargetBranches);
 
 /// <summary>A comment this tool posted earlier, linked to the finding that produced it.</summary>
-public sealed record PublishedComment(string ProviderId, string Fingerprint, string? File, int? Line);
+/// <param name="IsResolved">Its thread is resolved on the PR, by this tool or by a person.</param>
+public sealed record PublishedComment(string ProviderId, string Fingerprint, string? File, int? Line, bool IsResolved = false);
 
 /// <summary>A finding to post inline, with the fingerprint the engine computed for dedup across runs.</summary>
 public sealed record InlineComment(Finding Finding, string Fingerprint);

@@ -34,3 +34,34 @@ internal sealed record ReviewRequest(string CommitId, string Body, string Event,
 internal sealed record MergeRequest(string MergeMethod, string Sha);
 
 internal sealed record ErrorDto(string? Message);
+
+internal sealed record ReplyRequest(string Body);
+
+// GraphQL, camelCase. Review threads are GraphQL-only: REST has no thread ids or resolved state.
+internal sealed record GraphQlRequest(string Query, object Variables);
+
+internal sealed record GraphQlResponse<T>(T? Data, IReadOnlyList<GraphQlError>? Errors);
+
+internal sealed record GraphQlError(string Message);
+
+internal sealed record ThreadsData(ThreadsRepository? Repository);
+
+internal sealed record ThreadsRepository(ThreadsPullRequest? PullRequest);
+
+internal sealed record ThreadsPullRequest(ThreadConnection ReviewThreads);
+
+internal sealed record ThreadConnection(PageInfo PageInfo, IReadOnlyList<ThreadNode> Nodes);
+
+internal sealed record PageInfo(bool HasNextPage, string? EndCursor);
+
+internal sealed record ThreadNode(string Id, bool IsResolved, ThreadComments Comments);
+
+internal sealed record ThreadComments(IReadOnlyList<ThreadComment> Nodes);
+
+internal sealed record ThreadComment(long? DatabaseId);
+
+internal sealed record ResolveData(ResolvePayload? ResolveReviewThread);
+
+internal sealed record ResolvePayload(ThreadState? Thread);
+
+internal sealed record ThreadState(bool IsResolved);

@@ -247,8 +247,11 @@ The agent always gets the whole PR checkout, so it can read surrounding code. On
 
 **Findings across reviews.** A finding posted by a published review (inline or in the summary) stays *open* until a later review resolves it:
 
-- **Resolved** when its lines changed since the head it was reported against (old-side lines of `thatHead..newHead`; a deleted file counts as changed) and the agent didn't report its fingerprint again. Resolutions are recorded in the database and counted in the review summary. Resolving the GitHub thread comes next.
+- **Fixed** when its lines changed since the head it was reported against (old-side lines of `thatHead..newHead`; a deleted file counts as changed) and the agent didn't report its fingerprint again. After the review is published, its inline thread gets a short reply ("Fixed in `<sha>`…") and is resolved (GitHub: REST reply, GraphQL `resolveReviewThread`). A thread that can't be resolved is a warning, not a failed review; the finding counts as fixed either way. Dry runs list the threads they would resolve.
+- **Dismissed** when a person resolved its thread on the PR. A person's call stands: it no longer blocks, even if the agent reports it again, and it isn't posted again.
 - **Still open** otherwise, including when reported again. It isn't posted again, and the PR's own comments with our fingerprint marker are checked as well. An open blocking finding keeps blocking under the current policy's filter and blocking rules, wherever it is, so `approve` and `gate` never approve a PR on a delta that left an earlier blocker untouched.
+
+Fixed and dismissed findings are recorded in the database (`ResolvedByJobId`) and counted in the review summary. Findings that were only in a summary have no thread; they're resolved in the database only.
 
 If the head an open finding was reported against is gone, it counts as untouched and stays open.
 
