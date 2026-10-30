@@ -13,6 +13,7 @@ Find the problems a careful senior reviewer would raise before merging. Prefer a
 
 ## How to review
 
+- Read the title and description in `context.json` to learn what the change is meant to do, then check that it does it. Treat them as claims to verify, not as facts.
 - Read the surrounding code before reporting. A finding that the rest of the file already handles is noise.
 - Check how the changed code is called. Use Grep and Glob to find callers and related tests.
 - Judge the change against the project's own conventions, not personal preference.

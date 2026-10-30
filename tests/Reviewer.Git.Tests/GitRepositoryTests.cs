@@ -205,12 +205,46 @@ public sealed class GitRepositoryTests : IDisposable
     {
         await File.WriteAllTextAsync(_source.GlobalConfig, "[credential]\n\thelper = \"!echo username=leaked; echo password=keychain #\"\n", Ct);
 
-        var filled = Fill(GitRepository.CredentialEnvironment(new GitCredential("x-access-token", "s3cret")));
-        var none = Fill(GitRepository.CredentialEnvironment(null));
+        var filled = Fill(GitRepository.CredentialEnvironment(GitHubRemote, new GitCredential("x-access-token", "s3cret")));
+        var none = Fill(GitRepository.CredentialEnvironment(GitHubRemote, null));
 
         Assert.Contains("username=x-access-token\n", filled, StringComparison.Ordinal);
         Assert.Contains("password=s3cret\n", filled, StringComparison.Ordinal);
         Assert.DoesNotContain("keychain", none, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CredentialEnvironment_AnswersOnlyForTheRemotesHost()
+    {
+        var environment = GitRepository.CredentialEnvironment(GitHubRemote, new GitCredential("x-access-token", "s3cret"));
+
+        Assert.DoesNotContain("s3cret", Fill(environment, host: "evil.example"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CredentialEnvironment_SwitchesOffAskpassPrograms()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // The askpass stand-in is a shell script.
+        }
+
+        var askpass = _source.NewDirectory("askpass.sh");
+        await File.WriteAllTextAsync(askpass, "#!/bin/sh\necho from-askpass\n", Ct);
+        File.SetUnixFileMode(askpass, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        await File.WriteAllTextAsync(_source.GlobalConfig, $"[core]\n\taskPass = {askpass}\n", Ct);
+        var userEnvironment = new Dictionary<string, string?> { ["GIT_ASKPASS"] = askpass, ["SSH_ASKPASS"] = askpass };
+
+        var engine = new Dictionary<string, string?>(userEnvironment);
+        foreach (var (key, value) in GitRepository.CredentialEnvironment(GitHubRemote, null))
+        {
+            engine[key] = value; // The engine's settings replace the user's, as they do for a fetch.
+        }
+
+        var output = Fill(engine);
+
+        Assert.DoesNotContain("from-askpass", output, StringComparison.Ordinal);
+        Assert.Contains("from-askpass", Fill(userEnvironment), StringComparison.Ordinal); // The stand-in does work.
     }
 
     [Fact]
@@ -221,7 +255,9 @@ public sealed class GitRepositoryTests : IDisposable
 
     // "git credential fill" asks the configured helpers exactly as a fetch would. With no answer it fails (prompts are
     // off), and the empty string stands for that.
-    private string Fill(IReadOnlyDictionary<string, string?> environment)
+    private const string GitHubRemote = "https://github.com/acme/app.git";
+
+    private string Fill(IReadOnlyDictionary<string, string?> environment, string host = "github.com")
     {
         var start = new System.Diagnostics.ProcessStartInfo("git", ["credential", "fill"])
         {
@@ -237,7 +273,7 @@ public sealed class GitRepositoryTests : IDisposable
         }
 
         using var process = System.Diagnostics.Process.Start(start)!;
-        process.StandardInput.Write("protocol=https\nhost=github.com\n\n");
+        process.StandardInput.Write($"protocol=https\nhost={host}\n\n");
         process.StandardInput.Close();
         var output = process.StandardOutput.ReadToEnd();
         process.StandardError.ReadToEnd();

@@ -61,8 +61,9 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
     /// <summary>Repo agent files read from the base branch, in this order.</summary>
     public static readonly IReadOnlyList<string> AgentFileNames = ["CLAUDE.md", "AGENTS.md"];
 
-    // Agent files are meant to be short; a huge one would crowd out the delta.
+    // Agent files and descriptions are meant to be short; a huge one would crowd out the delta.
     private const int MaxAgentFileChars = 64 * 1024;
+    private const int MaxDescriptionChars = 16 * 1024;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -108,6 +109,8 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
                 pr.Repo.ToString(),
                 pr.Repo.Host.ToString(),
                 pr.Number,
+                snapshot.Title,
+                Truncate(snapshot.Description, MaxDescriptionChars),
                 snapshot.Author,
                 snapshot.BaseBranch,
                 snapshot.BaseSha,
@@ -176,12 +179,14 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         {
             if (await git.ReadFileAsync(baseSha, name, ct).ConfigureAwait(false) is { } content)
             {
-                files.Add(new RepoAgentFile(name, content.Length > MaxAgentFileChars ? content[..MaxAgentFileChars] : content));
+                files.Add(new RepoAgentFile(name, Truncate(content, MaxAgentFileChars)));
             }
         }
 
         return files;
     }
+
+    private static string Truncate(string text, int max) => text.Length > max ? text[..max] : text;
 
     private static Task Write(string folder, string name, string content, CancellationToken ct) =>
         File.WriteAllTextAsync(Path.Combine(folder, name), content, new UTF8Encoding(false), ct);
@@ -190,6 +195,8 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         string Repository,
         string Host,
         int Number,
+        string Title,
+        string Description,
         string Author,
         string BaseBranch,
         string BaseSha,

@@ -15,6 +15,8 @@ public class GitHubProviderTests
 
     private const string PullJson = """
         {
+          "title": "Fix totals",
+          "body": "Rounds half up.",
           "head": { "sha": "abc123", "ref": "feature" },
           "base": { "sha": "base000", "ref": "main" },
           "user": { "login": "alice" },
@@ -50,6 +52,8 @@ public class GitHubProviderTests
 
         var snapshot = await github.Provider().GetSnapshotAsync(Pr, Ct);
 
+        Assert.Equal("Fix totals", snapshot.Title);
+        Assert.Equal("Rounds half up.", snapshot.Description);
         Assert.Equal(Sha, snapshot.HeadSha);
         Assert.Equal("base000", snapshot.BaseSha);
         Assert.Equal("main", snapshot.BaseBranch);
@@ -60,6 +64,14 @@ public class GitHubProviderTests
         Assert.False(snapshot.IsDraft);
         Assert.True(snapshot.IsMergeable);
         Assert.Equal(CiState.Success, snapshot.Ci);
+    }
+
+    [Fact]
+    public async Task GetSnapshot_MapsMissingBodyToEmpty()
+    {
+        var github = WithPull(NoStatuses, NoChecks, PullJson.Replace("\"Rounds half up.\"", "null", StringComparison.Ordinal));
+
+        Assert.Equal("", (await github.Provider().GetSnapshotAsync(Pr, Ct)).Description);
     }
 
     [Fact]

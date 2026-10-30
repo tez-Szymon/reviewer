@@ -8,8 +8,8 @@ namespace Reviewer.Instructions;
 public sealed record Skill(string Name, IReadOnlyList<string> AppliesTo, IReadOnlyList<string> Categories, string Body, string Source)
 {
     /// <summary>
-    /// Parses optional frontmatter with <c>name</c>, <c>appliesTo</c> and <c>categories</c>. Values are scalars or
-    /// flow lists (<c>[a, "b"]</c>); unknown keys are ignored.
+    /// Parses optional frontmatter with <c>name</c>, <c>appliesTo</c> and <c>categories</c>. Values are scalars, flow
+    /// lists (<c>[a, "b"]</c>) or block lists (<c>- a</c> on the following lines); unknown keys are ignored.
     /// </summary>
     public static Skill Parse(string source, string text)
     {
@@ -24,25 +24,43 @@ public sealed record Skill(string Name, IReadOnlyList<string> AppliesTo, IReadOn
             var end = Array.FindIndex(lines, 1, l => l.Trim() == "---");
             if (end > 0)
             {
-                foreach (var line in lines[1..end])
+                for (var i = 1; i < end; i++)
                 {
+                    var line = lines[i];
                     var colon = line.IndexOf(':', StringComparison.Ordinal);
-                    if (colon <= 0)
+                    if (colon <= 0 || line.TrimStart().StartsWith('-'))
                     {
                         continue;
                     }
 
                     var value = line[(colon + 1)..].Trim();
+                    IReadOnlyList<string> list;
+                    if (value.Length == 0)
+                    {
+                        // A block list: the "- item" lines that follow. Items stay whole, so globs like *.{cs,ts} work.
+                        var items = new List<string>();
+                        while (i + 1 < end && lines[i + 1].TrimStart().StartsWith('-'))
+                        {
+                            items.Add(Unquote(lines[++i].TrimStart()[1..]));
+                        }
+
+                        list = [.. items.Where(item => item.Length > 0)];
+                    }
+                    else
+                    {
+                        list = ParseList(value);
+                    }
+
                     switch (line[..colon].Trim())
                     {
                         case "name" when Unquote(value).Length > 0:
                             name = Unquote(value);
                             break;
                         case "appliesTo":
-                            appliesTo = ParseList(value);
+                            appliesTo = list;
                             break;
                         case "categories":
-                            categories = ParseList(value);
+                            categories = list;
                             break;
                     }
                 }

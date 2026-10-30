@@ -38,7 +38,7 @@ public sealed class GitRepository : IGitRepository
     public async Task FetchAsync(string remoteUrl, IReadOnlyList<string> refspecs, GitCredential? credential, CancellationToken ct)
     {
         IReadOnlyList<string> args = ["fetch", "--quiet", "--no-tags", "--force", "--", remoteUrl, .. refspecs];
-        var result = await RunRawAsync(args, null, ct, CredentialEnvironment(credential)).ConfigureAwait(false);
+        var result = await RunRawAsync(args, null, ct, CredentialEnvironment(remoteUrl, credential)).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             throw Failure(args, result);
@@ -46,25 +46,33 @@ public sealed class GitRepository : IGitRepository
     }
 
     /// <summary>
-    /// Git config passed through the environment: drops every configured credential helper (the user's keychain must
-    /// not answer for the engine) and, with a credential, adds one that reads it from environment variables. The
-    /// secret never appears in arguments, where other processes could see it.
+    /// Git config passed through the environment. Nothing of the user's may answer for the engine: every configured
+    /// credential helper is dropped and askpass programs are switched off. With a credential, one helper is added that
+    /// reads it from environment variables, scoped to the remote's origin so a redirect to another host never gets
+    /// it. The secret never appears in arguments, where other processes could see it.
     /// </summary>
-    internal static Dictionary<string, string?> CredentialEnvironment(GitCredential? credential)
+    internal static Dictionary<string, string?> CredentialEnvironment(string remoteUrl, GitCredential? credential)
     {
-        var env = new Dictionary<string, string?>
+        // An empty GIT_ASKPASS also stops git from falling back to core.askPass and SSH_ASKPASS; Windows can't hold
+        // an empty variable, so core.askPass is cleared as well.
+        var env = new Dictionary<string, string?> { ["GIT_ASKPASS"] = "" };
+        List<(string Key, string Value)> config = [("credential.helper", ""), ("core.askPass", "")];
+        if (credential is not null
+            && Uri.TryCreate(remoteUrl, UriKind.Absolute, out var remote)
+            && remote.Scheme is "https" or "http")
         {
-            ["GIT_CONFIG_COUNT"] = credential is null ? "1" : "2",
-            ["GIT_CONFIG_KEY_0"] = "credential.helper",
-            ["GIT_CONFIG_VALUE_0"] = "",
-        };
-        if (credential is not null)
-        {
-            env["GIT_CONFIG_KEY_1"] = "credential.helper";
-            env["GIT_CONFIG_VALUE_1"] =
-                "!f() { test \"$1\" = get && printf 'username=%s\\npassword=%s\\n' \"$REVIEWER_GIT_USERNAME\" \"$REVIEWER_GIT_PASSWORD\"; }; f";
+            config.Add((
+                $"credential.{remote.GetLeftPart(UriPartial.Authority)}.helper",
+                "!f() { test \"$1\" = get && printf 'username=%s\\npassword=%s\\n' \"$REVIEWER_GIT_USERNAME\" \"$REVIEWER_GIT_PASSWORD\"; }; f"));
             env["REVIEWER_GIT_USERNAME"] = credential.Username;
             env["REVIEWER_GIT_PASSWORD"] = credential.Password;
+        }
+
+        env["GIT_CONFIG_COUNT"] = config.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        for (var i = 0; i < config.Count; i++)
+        {
+            env[$"GIT_CONFIG_KEY_{i}"] = config[i].Key;
+            env[$"GIT_CONFIG_VALUE_{i}"] = config[i].Value;
         }
 
         return env;
@@ -142,7 +150,14 @@ public sealed class GitRepository : IGitRepository
     {
         var command = Cli.Wrap("git")
             .WithArguments(["--git-dir", Path, .. args])
-            .WithEnvironmentVariables(extraEnvironment is null ? Environment : new Dictionary<string, string?>(Environment.Concat(extraEnvironment)))
+            .WithEnvironmentVariables(env =>
+            {
+                env.Set(Environment);
+                if (extraEnvironment is not null)
+                {
+                    env.Set(extraEnvironment);
+                }
+            })
             .WithValidation(CommandResultValidation.None);
         if (stdin is not null)
         {

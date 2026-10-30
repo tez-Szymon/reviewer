@@ -33,6 +33,7 @@ Needs Claude Code logged in (`claude auth login`) and a GitHub token from `GITHU
 reviewer status                                         # agent and GitHub account
 reviewer review https://github.com/acme/api/pull/7 --dry-run   # show the plan only
 reviewer review https://github.com/acme/api/pull/7             # post the review
+reviewer review <url> --dry-run --min-confidence 0.4           # see what a lower threshold adds
 ```
 
 State lives in `~/.reviewer` (or `REVIEWER_HOME`): job folders with the agent's inputs, output and `plan.json`, and one bare repository per reviewed repo. Markdown skills in `~/.reviewer/skills/*.md` are added to every review.

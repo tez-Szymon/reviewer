@@ -1,3 +1,4 @@
+using System.Globalization;
 using Reviewer.Core.Findings;
 using Reviewer.Engine;
 
@@ -46,6 +47,6 @@ internal static class ReviewPrinter
     private static void WriteFinding(TextWriter output, Finding f, bool blocking)
     {
         var flag = blocking ? " BLOCKING" : "";
-        output.WriteLine($"  [{f.Severity.ToString().ToLowerInvariant()}/{f.Category.ToString().ToLowerInvariant()} {f.Confidence:0.00}{flag}] {f.File}:{f.StartLine} {f.Title}");
+        output.WriteLine($"  [{f.Severity.ToString().ToLowerInvariant()}/{f.Category.ToString().ToLowerInvariant()} {f.Confidence.ToString("0.00", CultureInfo.InvariantCulture)}{flag}] {f.File}:{f.StartLine} {f.Title}");
     }
 }

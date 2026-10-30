@@ -8,6 +8,8 @@ internal sealed record LabelDto(string Name);
 internal sealed record BranchDto(string Sha, string Ref);
 
 internal sealed record PullRequestDto(
+    string? Title,
+    string? Body,
     BranchDto Head,
     BranchDto Base,
     UserDto User,

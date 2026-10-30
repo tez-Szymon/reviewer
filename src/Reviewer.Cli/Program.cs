@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Globalization;
 using Reviewer.Agents.Cli;
 using Reviewer.Cli;
 using Reviewer.Core.Agents;
@@ -24,11 +25,27 @@ var prUrl = new Argument<Uri>("pr-url")
 var dryRun = new Option<bool>("--dry-run") { Description = "Show the review plan without publishing it" };
 var agent = new Option<string>("--agent") { Description = "Agent to use instead of the configured default", DefaultValueFactory = _ => "claude-code" };
 var model = new Option<string?>("--model") { Description = "Model for the agent, e.g. sonnet or opus; defaults to the CLI's own" };
+var minConfidence = new Option<double?>("--min-confidence")
+{
+    Description = "Drop findings below this confidence (0-1); default 0.6",
+    // The default parser follows the system locale; accept "0.4" (and "0,4") everywhere.
+    CustomParser = result =>
+    {
+        var value = result.Tokens.Single().Value;
+        if (double.TryParse(value.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && number is >= 0 and <= 1)
+        {
+            return number;
+        }
+
+        result.AddError($"--min-confidence must be a number between 0 and 1, not '{value}'.");
+        return null;
+    },
+};
 
 var runner = new CliWrapProcessRunner();
 var paths = ReviewerPaths.Default;
 
-var review = new Command("review", "Review one pull request now") { prUrl, dryRun, agent, model };
+var review = new Command("review", "Review one pull request now") { prUrl, dryRun, agent, model, minConfidence };
 review.SetAction(async (parse, ct) =>
 {
     if (!GitHubUrls.TryParsePullRequest(parse.GetValue(prUrl)!, out var pr))
@@ -57,7 +74,11 @@ review.SetAction(async (parse, ct) =>
         var request = new ReviewRequest(
             pr,
             new ReviewSource(GitHubUrls.CloneUrl(pr.Repo), GitHubUrls.PullHeadRef(pr.Number), new GitCredential("x-access-token", token)),
-            ReviewDefaults.Policy with { DryRun = parse.GetValue(dryRun) },
+            ReviewDefaults.Policy with
+            {
+                DryRun = parse.GetValue(dryRun),
+                MinConfidence = parse.GetValue(minConfidence) ?? ReviewDefaults.Policy.MinConfidence,
+            },
             await ReviewDefaults.InstructionsAsync(paths, ct),
             ReviewDefaults.Timeout);
 

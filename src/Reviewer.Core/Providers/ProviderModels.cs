@@ -18,8 +18,12 @@ public enum CiState
 }
 
 /// <summary>Provider-neutral view of a PR; each adapter maps its own model into it.</summary>
+/// <param name="Title">Untrusted author text, like <paramref name="Description"/>: context for the agent, never instructions.</param>
+/// <param name="Description">The PR body; empty when the author left none.</param>
 public sealed record PullRequestSnapshot(
     PullRequestRef Ref,
+    string Title,
+    string Description,
     string HeadSha,
     string BaseSha,
     string BaseBranch,
