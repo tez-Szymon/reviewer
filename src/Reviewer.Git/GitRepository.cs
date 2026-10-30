@@ -66,6 +66,16 @@ public sealed class GitRepository : IGitRepository
             .Select(p => new ChangedFile(p, lines.TryGetValue(p, out var spans) ? spans : []))];
     }
 
+    public async Task<string?> ReadFileAsync(string sha, string path, CancellationToken ct)
+    {
+        // "-e" exits non-zero for a missing path; the commit itself is expected to be present.
+        var spec = $"{sha}:{path}";
+        var exists = await RunRawAsync(["cat-file", "-e", spec], null, ct).ConfigureAwait(false);
+        return exists.ExitCode == 0
+            ? await RunAsync(["cat-file", "blob", spec], ct).ConfigureAwait(false)
+            : null;
+    }
+
     public async Task<bool> IsAncestorAsync(string ancestorSha, string descendantSha, CancellationToken ct)
     {
         var result = await RunRawAsync(["merge-base", "--is-ancestor", ancestorSha, descendantSha], null, ct).ConfigureAwait(false);

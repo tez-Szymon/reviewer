@@ -18,6 +18,9 @@ public interface IGitRepository
     /// <summary>Files present in <paramref name="toSha"/> that differ from <paramref name="fromSha"/>, with their changed lines.</summary>
     Task<IReadOnlyList<ChangedFile>> ChangedFilesAsync(string fromSha, string toSha, CancellationToken ct);
 
+    /// <summary>Content of <paramref name="path"/> at <paramref name="sha"/>, or null when the file doesn't exist there.</summary>
+    Task<string?> ReadFileAsync(string sha, string path, CancellationToken ct);
+
     Task<bool> IsAncestorAsync(string ancestorSha, string descendantSha, CancellationToken ct);
 
     /// <summary>Stable patch-id per commit SHA in <paramref name="range"/>, used to match commits across rebases.</summary>
