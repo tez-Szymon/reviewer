@@ -173,6 +173,49 @@ public sealed class ReReviewTests : IDisposable
         Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));
         Assert.Equal(second.JobId, (await _store.GetJobAsync(first.JobId, Ct))!.Findings.Single().ResolvedByJobId);
         Assert.Contains("1 earlier finding(s) fixed", _provider.Published[1].Summary, StringComparison.Ordinal);
+        var (comment, note) = Assert.Single(_provider.Resolutions);
+        Assert.Equal("c0", comment.ProviderId);
+        Assert.StartsWith($"Fixed in {second.Snapshot.HeadSha[..7]}", note, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ThreadResolvedByAPerson_DismissesTheBlocker_EvenWhenReportedAgain()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        var first = await ReviewAsync();
+        _provider.ResolvedThreads.Add("c0"); // Someone decided it's not a bug.
+        Edit(9, "unrelated");
+        _source.Commit("unrelated change");
+        _agent.Reports.Enqueue(new FindingsReport("still a bug", [Bug with { Id = "again" }]));
+
+        var second = await ReviewAsync();
+
+        Assert.Equal(ReviewDecision.RequestChanges, first.Plan.Decision);
+        Assert.Equal(ReviewDecision.Approve, second.Plan.Decision);
+        Assert.Equal(1, second.Dismissed);
+        Assert.Empty(_provider.Published[1].Comments);
+        Assert.Empty(_provider.Resolutions);
+        Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));
+        Assert.Equal(FindingDisposition.Dropped, Assert.Single((await _store.GetJobAsync(second.JobId, Ct))!.Findings).Disposition);
+        Assert.Contains("1 dismissed on the PR", _provider.Published[1].Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResolveFailure_IsAWarning_TheReviewAndTheFixStillCount()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        Edit(3, "fixed");
+        _source.Commit("fix the bug");
+        _agent.Reports.Enqueue(new FindingsReport("fixed", []));
+        _provider.ResolveError = new HttpRequestException("no permission");
+
+        var second = await ReviewAsync();
+
+        Assert.True(second.Published);
+        Assert.Contains("no permission", Assert.Single(second.Warnings), StringComparison.Ordinal);
+        Assert.Equal(JobState.Succeeded, (await _store.GetJobAsync(second.JobId, Ct))!.Job.State);
+        Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));
     }
 
     [Fact]
@@ -190,6 +233,8 @@ public sealed class ReReviewTests : IDisposable
 
         Assert.Equal(1, dry.Resolved);
         Assert.False(dry.Published);
+        Assert.Equal("c0", Assert.Single(dry.Plan.CommentsToResolve).ProviderId);
+        Assert.Single(_provider.Resolutions); // Only from the real run below.
         Assert.Equal(DeltaKind.NewCommits, real.Delta.Kind); // Not skipped: the dry run didn't count as reviewed.
         Assert.Equal(first.Snapshot.HeadSha, real.Delta.FromSha);
         Assert.Equal(1, real.Resolved);

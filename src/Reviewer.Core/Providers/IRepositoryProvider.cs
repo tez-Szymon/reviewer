@@ -15,6 +15,7 @@ public interface IRepositoryProvider
 
     /// <summary>Posts the summary, inline comments and decision as one review bound to <see cref="ReviewResult.HeadSha"/>.</summary>
     Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct);
-    Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, CancellationToken ct);
+    /// <summary>Replies to <paramref name="comment"/> with <paramref name="note"/> and resolves its thread.</summary>
+    Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct);
     Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct);
 }

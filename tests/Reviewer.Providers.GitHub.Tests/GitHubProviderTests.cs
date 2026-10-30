@@ -140,14 +140,99 @@ public class GitHubProviderTests
                 """, nextPage: $"{Pull}/comments?per_page=100&page=2")
             .On($"GET {Pull}/comments?per_page=100&page=2", """
                 [{ "id": 4, "user": { "login": "reviewer-bot" }, "body": "y\n<!-- reviewer:fp=fp-4 -->", "path": "b.cs", "line": null }]
-                """);
+                """)
+            .On("POST graphql", Threads(("T1", false, 1), ("T4", true, 4)));
 
         var comments = await github.Provider().GetOwnCommentsAsync(Pr, Ct);
 
         Assert.Equal(
-            [new PublishedComment("1", "fp-1", "a.cs", 3), new PublishedComment("4", "fp-4", "b.cs", null)],
+            [new PublishedComment("1", "fp-1", "a.cs", 3), new PublishedComment("4", "fp-4", "b.cs", null, IsResolved: true)],
             comments);
+        var query = github.Requests.Last().Body!.Value;
+        Assert.Equal("acme", query.GetProperty("variables").GetProperty("owner").GetString());
+        Assert.Equal(7, query.GetProperty("variables").GetProperty("number").GetInt32());
     }
+
+    [Fact]
+    public async Task GetOwnComments_WithoutOurComments_SkipsTheThreadQuery()
+    {
+        var github = new FakeGitHub()
+            .On("GET user", """{ "login": "reviewer-bot" }""")
+            .On($"GET {Pull}/comments?per_page=100", "[]");
+
+        Assert.Empty(await github.Provider().GetOwnCommentsAsync(Pr, Ct));
+        Assert.DoesNotContain(github.Requests, r => r.Route == "POST graphql");
+    }
+
+    [Fact]
+    public async Task ResolveComment_RepliesWithTheNote_ThenResolvesTheThread_AcrossThreadPages()
+    {
+        var github = new FakeGitHub()
+            .On("POST graphql", Threads(hasNextPage: true, ("T1", false, 1)))
+            .On("POST graphql", Threads(("T9", false, 9)))
+            .On("POST graphql", """{ "data": { "resolveReviewThread": { "thread": { "isResolved": true } } } }""")
+            .On($"POST {Pull}/comments/9/replies", "{}");
+
+        await github.Provider().ResolveCommentAsync(Pr, new PublishedComment("9", "fp", "a.cs", 3), "Fixed, ping @alice <!-- x -->", Ct);
+
+        var routes = github.Requests.Select(r => r.Route).ToList();
+        Assert.Equal(["POST graphql", "POST graphql", $"POST {Pull}/comments/9/replies", "POST graphql"], routes);
+        Assert.Equal("cursor", github.Requests[1].Body!.Value.GetProperty("variables").GetProperty("after").GetString());
+        var note = github.Requests[2].Body!.Value.GetProperty("body").GetString()!;
+        Assert.DoesNotContain("@alice", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("<!--", note, StringComparison.Ordinal);
+        Assert.Equal("T9", github.Requests[3].Body!.Value.GetProperty("variables").GetProperty("threadId").GetString());
+    }
+
+    [Fact]
+    public async Task ResolveComment_AlreadyResolvedThread_IsLeftAlone()
+    {
+        var github = new FakeGitHub().On("POST graphql", Threads(("T1", true, 1)));
+
+        await github.Provider().ResolveCommentAsync(Pr, new PublishedComment("1", "fp", "a.cs", 3), "Fixed.", Ct);
+
+        Assert.Single(github.Requests);
+    }
+
+    [Fact]
+    public async Task ResolveComment_GraphQlErrors_Throw()
+    {
+        var github = new FakeGitHub()
+            .On("POST graphql", Threads(("T1", false, 1)))
+            .On($"POST {Pull}/comments/1/replies", "{}")
+            .On("POST graphql", """{ "data": null, "errors": [{ "message": "Resource not accessible by integration" }] }""");
+
+        var error = await Assert.ThrowsAsync<GitHubApiException>(() =>
+            github.Provider().ResolveCommentAsync(Pr, new PublishedComment("1", "fp", "a.cs", 3), "Fixed.", Ct));
+
+        Assert.Contains("Resource not accessible", error.Message, StringComparison.Ordinal);
+    }
+
+    private static string Threads(params (string Id, bool Resolved, long FirstComment)[] threads) => Threads(false, threads);
+
+    private static string Threads(bool hasNextPage, params (string Id, bool Resolved, long FirstComment)[] threads) =>
+        JsonSerializer.Serialize(new
+        {
+            data = new
+            {
+                repository = new
+                {
+                    pullRequest = new
+                    {
+                        reviewThreads = new
+                        {
+                            pageInfo = new { hasNextPage, endCursor = hasNextPage ? "cursor" : null },
+                            nodes = threads.Select(t => new
+                            {
+                                id = t.Id,
+                                isResolved = t.Resolved,
+                                comments = new { nodes = new[] { new { databaseId = t.FirstComment } } },
+                            }),
+                        },
+                    },
+                },
+            },
+        });
 
     [Theory]
     [InlineData(ReviewDecision.None, "COMMENT")]
