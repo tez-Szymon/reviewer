@@ -348,7 +348,13 @@ reviewer serve                      # run the engine headless
 
 ## Storage, secrets and security
 
-**Storage.** SQLite at `~/.reviewer/reviewer.db` via EF Core. Tables: `Jobs` (state machine: Queued, Running, Throttled, Succeeded, Failed, Cancelled), `PullRequests` (last reviewed head/base, patch-ids), `Findings` (with fingerprint), `PublishedComments` (provider comment id ↔ fingerprint), `PollState` (ETags, last seen). Job folders are pruned after N days; findings stay in the DB.
+**Storage.** SQLite at `~/.reviewer/reviewer.db` via EF Core, in WAL mode so the CLI can read while the engine writes. The engine applies pending migrations when it opens the database; migrations live in `Reviewer.Engine/State/Migrations` and are added with the repo's local `dotnet ef` tool. Tables:
+
+- `Jobs`: one row per job folder. State machine Queued, Running, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, summary, error and retry time. Failed and throttled runs are recorded too.
+- `Findings`: every finding the agent reported, in report order, with what the policy did with it (`inline`, `summary`, `dropped`), whether it blocked, and the fingerprint for kept ones.
+- `PullRequests`: each PR's last *published* review (head, base, job). Dry runs don't move it, since nothing reached the PR.
+
+Added by later M2 slices: patch-ids on `PullRequests` for rebase matching, `PollState` (ETags, last seen) for the scheduler. Published comments aren't mirrored: each one carries its fingerprint in a hidden marker, and `GetOwnCommentsAsync` reads them back from the provider. Hosts and repo names compare case-insensitively. Job folders are pruned after N days; findings stay in the DB.
 
 **Secrets.** Tokens are kept in the OS credential store: macOS Keychain, Windows Credential Manager, libsecret on Linux. Config holds only references. Tokens are never written into job folders, logs or the agent's environment. Git fetches use a credential helper scoped to the engine.
 

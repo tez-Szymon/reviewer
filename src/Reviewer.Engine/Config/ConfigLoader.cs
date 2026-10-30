@@ -233,7 +233,8 @@ public static partial class ConfigLoader
 
             switch (account.Provider)
             {
-                case "github" when !account.Host.IsAbsoluteUri || account.Host.Host != GitHubHost.Host:
+                // Compared the way ReviewerConfig.For matches PR URLs, so http:// or another port can't pass here and then match nothing.
+                case "github" when !account.Host.IsAbsoluteUri || !ReviewerConfig.SameHost(account.Host, GitHubHost):
                     errors.Add($"{path}.host", "only https://github.com is supported for now; GitHub Enterprise Server comes later.");
                     break;
                 case "github":
@@ -299,7 +300,9 @@ public static partial class ConfigLoader
             errors.Add($"{path}.agent", $"must be one of: {string.Join(", ", AgentsConfig.Known)}.");
         }
 
-        if (earlier.Any(r => r.Account == entry.Account && string.Equals(r.Repo, entry.Repo, StringComparison.OrdinalIgnoreCase)))
+        // Compare the accounts the entries resolve to: with one account, naming it and leaving it out are the same.
+        string? Resolved(RepoEntry r) => r.Account ?? (accounts.Count == 1 ? accounts[0].Id : null);
+        if (earlier.Any(r => Resolved(r) == Resolved(entry) && string.Equals(r.Repo, entry.Repo, StringComparison.OrdinalIgnoreCase)))
         {
             errors.Add($"{path}.repo", $"{entry.Repo} is listed twice.");
         }

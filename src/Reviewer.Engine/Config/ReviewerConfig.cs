@@ -24,9 +24,15 @@ public sealed record ReviewerConfig(
     /// The settings a review of <paramref name="repo"/> runs with: its entry when it has one, otherwise the defaults
     /// and the account for its host.
     /// </summary>
-    /// <exception cref="ConfigException">No account is configured for the repo's host.</exception>
-    public EffectiveConfig For(RepoRef repo)
+    /// <param name="agentOverride">An agent to use instead of the configured one, e.g. from <c>--agent</c>; its own settings apply.</param>
+    /// <exception cref="ConfigException">No account is configured for the repo's host, or the override is no known agent.</exception>
+    public EffectiveConfig For(RepoRef repo, string? agentOverride = null)
     {
+        if (agentOverride is not null && !AgentsConfig.Known.Contains(agentOverride))
+        {
+            throw new ConfigException([$"Unknown agent '{agentOverride}'; use one of: {string.Join(", ", AgentsConfig.Known)}."]);
+        }
+
         var entry = Repos.FirstOrDefault(r =>
             string.Equals(r.Repo, $"{repo.Owner}/{repo.Name}", StringComparison.OrdinalIgnoreCase)
             && SameHost(Account(r.Account).Host, repo.Host));
@@ -34,7 +40,7 @@ public sealed record ReviewerConfig(
             ? Account(entry.Account)
             : Accounts.FirstOrDefault(a => SameHost(a.Host, repo.Host))
               ?? throw new ConfigException([$"No account in the config for {repo.Host.Host}."]);
-        var agentId = entry?.Agent ?? Agents.Default;
+        var agentId = agentOverride ?? entry?.Agent ?? Agents.Default;
         var agent = Agents.Get(agentId);
         var policy = entry?.Policy ?? Defaults;
         return new EffectiveConfig(account, agentId, agent, policy, ConfigLoader.Hash(agentId, agent, policy));
@@ -43,7 +49,8 @@ public sealed record ReviewerConfig(
     // Validation guarantees that a named account exists and that an unnamed one is unambiguous.
     private AccountConfig Account(string? id) => id is null ? Accounts[0] : Accounts.First(a => a.Id == id);
 
-    private static bool SameHost(Uri a, Uri b) => Uri.Compare(a, b, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
+    /// <summary>Same scheme, host and port: what decides which account a PR URL belongs to.</summary>
+    internal static bool SameHost(Uri a, Uri b) => Uri.Compare(a, b, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
 }
 
 /// <param name="Token">

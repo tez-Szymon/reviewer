@@ -7,6 +7,7 @@ using Reviewer.Core.Agents;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
 using Reviewer.Engine.Config;
+using Reviewer.Engine.State;
 using Reviewer.Git;
 using Reviewer.Providers.GitHub;
 
@@ -66,17 +67,17 @@ review.SetAction(async (parse, ct) =>
     EffectiveConfig effective;
     try
     {
-        effective = config.For(pr.Repo);
+        // With --agent, that agent's own model and timeout apply, and the config hash says so.
+        effective = config.For(pr.Repo, parse.GetValue(agent));
     }
     catch (ConfigException e)
     {
         return Fail(e.Message);
     }
 
-    var agentId = parse.GetValue(agent) ?? effective.AgentId;
-    if (agentId != AgentsConfig.ClaudeCodeId)
+    if (effective.AgentId != AgentsConfig.ClaudeCodeId)
     {
-        return Fail($"Agent '{agentId}' is not available yet; use claude-code.");
+        return Fail($"Agent '{effective.AgentId}' is not available yet; use claude-code.");
     }
 
     if (await GitHubToken.ResolveAsync(runner, effective.Account, ct) is not { } token)
@@ -91,7 +92,8 @@ review.SetAction(async (parse, ct) =>
         var reviewer = new ReviewRunner(
             new GitHubProvider(http),
             new ReviewContextBuilder(git, paths, TimeProvider.System),
-            new ClaudeCodeAgent(new ClaudeCodeOptions(Model: parse.GetValue(model) ?? effective.Agent.Model), runner));
+            new ClaudeCodeAgent(new ClaudeCodeOptions(Model: parse.GetValue(model) ?? effective.Agent.Model), runner),
+            await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct));
         var policy = effective.Policy.ToReviewPolicy();
         var request = new ReviewRequest(
             pr,
@@ -103,7 +105,8 @@ review.SetAction(async (parse, ct) =>
                 MinConfidence = parse.GetValue(minConfidence) ?? policy.MinConfidence,
             },
             await effective.Policy.Instructions.LoadAsync(paths, home, ct),
-            effective.Agent.Timeout);
+            effective.Agent.Timeout,
+            effective.Hash);
 
         Console.Error.WriteLine($"Reviewing {pr.Repo}#{pr.Number}; this can take several minutes...");
         ReviewPrinter.Print(await reviewer.RunAsync(request, ct), Console.Out);
@@ -114,6 +117,42 @@ review.SetAction(async (parse, ct) =>
         return Fail(e.RetryAt is { } at ? $"{e.Message}\nTry again after {at.ToLocalTime():g}." : e.Message);
     }
     catch (Exception e) when (e is AgentException or GitException or GitHubApiException or HttpRequestException)
+    {
+        return Fail(e.Message);
+    }
+});
+
+var historyRepo = new Option<string?>("--repo") { Description = "Only this repo, as owner/name" };
+var limit = new Option<int>("--limit") { Description = "How many jobs to list", DefaultValueFactory = _ => 20 };
+var history = new Command("history", "List past reviews, newest first") { historyRepo, limit };
+history.SetAction(async (parse, ct) =>
+{
+    if (parse.GetValue(limit) < 1)
+    {
+        return Fail("--limit must be at least 1.");
+    }
+
+    var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+    HistoryPrinter.PrintList(await store.ListJobsAsync(parse.GetValue(historyRepo), parse.GetValue(limit), ct), Console.Out);
+    return 0;
+});
+
+var jobId = new Argument<string>("job-id") { Description = "A job id from 'reviewer history', or its unique start" };
+var showJob = new Command("show", "Show one past review with its findings") { jobId };
+showJob.SetAction(async (parse, ct) =>
+{
+    var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+    try
+    {
+        if (await store.GetJobAsync(parse.GetValue(jobId)!, ct) is not { } details)
+        {
+            return Fail($"No job '{parse.GetValue(jobId)}'. See 'reviewer history'.");
+        }
+
+        HistoryPrinter.PrintJob(details, Console.Out);
+        return 0;
+    }
+    catch (InvalidOperationException e)
     {
         return Fail(e.Message);
     }
@@ -205,7 +244,7 @@ show.SetAction(async (parse, ct) =>
 
 var configCommand = new Command("config", $"Inspect {ConfigLoader.FileName} in the data folder") { validate, show };
 
-var root = new RootCommand("Local-first AI code reviewer") { review, status, configCommand };
+var root = new RootCommand("Local-first AI code reviewer") { review, history, showJob, status, configCommand };
 return await root.Parse(args).InvokeAsync();
 
 static async Task<ReviewerConfig?> LoadConfigAsync(ReviewerPaths paths, CancellationToken ct)

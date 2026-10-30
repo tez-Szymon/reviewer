@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- Only for 'dotnet ef migrations add'; not shipped. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 

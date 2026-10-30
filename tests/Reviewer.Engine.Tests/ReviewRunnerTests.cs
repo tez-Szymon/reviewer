@@ -2,6 +2,7 @@ using Reviewer.Core.Agents;
 using Reviewer.Core.Findings;
 using Reviewer.Core.Providers;
 using Reviewer.Engine.Config;
+using Reviewer.Engine.State;
 using Reviewer.Git;
 using Reviewer.Git.Tests;
 using Reviewer.Instructions;
@@ -22,8 +23,10 @@ public sealed class ReviewRunnerTests : IDisposable
     private static Finding Finding(string id, int line, Severity severity = Severity.Major, double confidence = 0.9) =>
         new(id, severity, Category.Correctness, confidence, "src/app.txt", line, line, $"Title {id}", "Body");
 
+    private ReviewStore? _store;
+
     private async Task<(ReviewRunner Runner, FakeProvider Provider, ReviewRequest Request)> SetUpAsync(
-        FindingsReport report, bool dryRun = false, Action? onFeature = null)
+        FindingsReport? report, bool dryRun = false, Action? onFeature = null, Exception? agentError = null)
     {
         _source.Write("src/app.txt", "one", "two");
         _source.Commit("base");
@@ -37,13 +40,16 @@ public sealed class ReviewRunnerTests : IDisposable
         var snapshot = new PullRequestSnapshot(pr, "t", "", head, _source.Head(), "main", "alice", [], [], [], false, CiState.Success, true);
         var provider = new FakeProvider(snapshot);
         var git = await GitRepository.OpenOrInitAsync(_source.NewDirectory("cache.git"), Ct);
-        var runner = new ReviewRunner(provider, new ReviewContextBuilder(git, _paths, TimeProvider.System), new FakeAgent(report));
+        _store = await ReviewStore.OpenAsync(_paths.Database, TimeProvider.System, Ct);
+        var runner = new ReviewRunner(
+            provider, new ReviewContextBuilder(git, _paths, TimeProvider.System), new FakeAgent(report, agentError), _store);
         var request = new ReviewRequest(
             pr,
             new ReviewSource(_source.Url, "refs/heads/feature"),
             ReviewerConfig.Default.Defaults.ToReviewPolicy() with { DryRun = dryRun },
             new InstructionSettings(true, [], [], RepoAgentFileMode.Ignore),
-            TimeSpan.FromMinutes(1));
+            TimeSpan.FromMinutes(1),
+            "cfg123");
         return (runner, provider, request);
     }
 
@@ -108,16 +114,80 @@ public sealed class ReviewRunnerTests : IDisposable
     [Fact]
     public async Task Run_AgentFailure_PublishesNothing_AndRemovesWorktree()
     {
-        var (runner, provider, request) = await SetUpAsync(null!);
+        var (runner, provider, request) = await SetUpAsync(null);
 
         await Assert.ThrowsAsync<AgentFailedException>(() => runner.RunAsync(request, Ct));
 
         Assert.Empty(provider.Published);
         var job = Assert.Single(Directory.GetDirectories(_paths.Jobs));
         Assert.False(Directory.Exists(Path.Combine(job, "worktree-1")));
+
+        var record = (await _store!.GetJobAsync(Path.GetFileName(job), Ct))!.Job;
+        Assert.Equal(JobState.Failed, record.State);
+        Assert.Equal("boom", record.Error);
+        Assert.NotNull(record.HeadSha);
+        Assert.NotNull(record.FinishedAt);
+        Assert.Null(await _store.GetPullRequestAsync(request.PullRequest, Ct));
     }
 
-    private sealed class FakeAgent(FindingsReport? report) : IReviewAgent
+    [Fact]
+    public async Task Run_RecordsJob_FindingsAndLastReviewedHead()
+    {
+        var report = new FindingsReport("Looks risky.", [Finding("in", 2), Finding("outside", 1), Finding("weak", 3, confidence: 0.1)]);
+        var (runner, provider, request) = await SetUpAsync(report);
+
+        var outcome = await runner.RunAsync(request, Ct);
+
+        var details = (await _store!.GetJobAsync(outcome.JobId, Ct))!;
+        Assert.Equal(JobState.Succeeded, details.Job.State);
+        Assert.True(details.Job.Published);
+        Assert.Equal("cfg123", details.Job.ConfigHash);
+        Assert.Equal("fake", details.Job.AgentId);
+        Assert.Equal(outcome.Snapshot.HeadSha, details.Job.HeadSha);
+        Assert.Equal(outcome.AttemptFolder, details.Job.AttemptFolder);
+        Assert.Equal("Looks risky.", details.Job.Summary);
+        Assert.Equal(
+            [("in", FindingDisposition.Inline), ("outside", FindingDisposition.Summary), ("weak", FindingDisposition.Dropped)],
+            details.Findings.Select(f => (f.FindingId, f.Disposition)));
+        Assert.True(details.Findings[0].Blocking);
+        Assert.Equal(Assert.Single(Assert.Single(provider.Published).Comments).Fingerprint, details.Findings[0].Fingerprint);
+        Assert.NotNull(details.Findings[1].Fingerprint);
+        Assert.Null(details.Findings[2].Fingerprint);
+
+        var pr = (await _store.GetPullRequestAsync(request.PullRequest, Ct))!;
+        Assert.Equal(outcome.Snapshot.HeadSha, pr.LastReviewedHead);
+        Assert.Equal(outcome.Snapshot.BaseSha, pr.LastReviewedBase);
+        Assert.Equal(outcome.JobId, pr.LastJobId);
+    }
+
+    [Fact]
+    public async Task Run_DryRun_IsRecorded_ButDoesNotCountAsReviewed()
+    {
+        var (runner, _, request) = await SetUpAsync(new FindingsReport("Fine.", [Finding("in", 2)]), dryRun: true);
+
+        var outcome = await runner.RunAsync(request, Ct);
+
+        var job = (await _store!.GetJobAsync(outcome.JobId, Ct))!.Job;
+        Assert.Equal(JobState.Succeeded, job.State);
+        Assert.True(job.DryRun);
+        Assert.False(job.Published);
+        Assert.Null(await _store.GetPullRequestAsync(request.PullRequest, Ct));
+    }
+
+    [Fact]
+    public async Task Run_Throttled_RecordsRetryTime()
+    {
+        var retryAt = new DateTimeOffset(2026, 10, 30, 18, 0, 0, TimeSpan.Zero);
+        var (runner, _, request) = await SetUpAsync(null, agentError: new AgentThrottledException("Usage limit reached.", retryAt));
+
+        await Assert.ThrowsAsync<AgentThrottledException>(() => runner.RunAsync(request, Ct));
+
+        var job = Assert.Single(await _store!.ListJobsAsync(null, 10, Ct)).Job;
+        Assert.Equal(JobState.Throttled, job.State);
+        Assert.Equal(retryAt, job.RetryAt);
+    }
+
+    private sealed class FakeAgent(FindingsReport? report, Exception? error) : IReviewAgent
     {
         public string Id => "fake";
 
@@ -128,7 +198,7 @@ public sealed class ReviewRunnerTests : IDisposable
         public Task<FindingsReport> ReviewAsync(ReviewContext context, CancellationToken ct)
         {
             Assert.True(File.Exists(Path.Combine(context.AttemptFolder, ReviewContextBuilder.DeltaFile)));
-            return report is null ? throw new AgentFailedException("boom") : Task.FromResult(report);
+            return report is null ? throw error ?? new AgentFailedException("boom") : Task.FromResult(report);
         }
     }
 

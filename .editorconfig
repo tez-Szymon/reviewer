@@ -13,3 +13,7 @@ indent_size = 2
 [tests/**.cs]
 # Test names use Method_Scenario underscores.
 dotnet_diagnostic.CA1707.severity = none
+
+[src/**/Migrations/*.cs]
+# Written by 'dotnet ef migrations add'; not hand-edited.
+generated_code = true

@@ -55,7 +55,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var (snapshot, source) = PullRequest();
         var (builder, _) = await BuilderAsync();
 
-        await using var prepared = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        await using var prepared = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
 
         var attempt = prepared.Context.AttemptFolder;
         Assert.Equal(Path.Combine(_paths.Jobs, "20261030-120000-acme-app-7", "1"), attempt);
@@ -71,7 +71,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var (snapshot, source) = PullRequest();
         var (builder, _) = await BuilderAsync();
 
-        await using var prepared = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        await using var prepared = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
 
         var patch = await File.ReadAllTextAsync(Path.Combine(prepared.Context.AttemptFolder, ReviewContextBuilder.DeltaFile), Ct);
         Assert.Contains("+TWO", patch, StringComparison.Ordinal);
@@ -88,7 +88,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var (snapshot, source) = PullRequest();
         var (builder, git) = await BuilderAsync();
 
-        await using var prepared = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        await using var prepared = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
 
         using var json = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(prepared.Context.AttemptFolder, ReviewContextBuilder.ContextFile), Ct));
         var root = json.RootElement;
@@ -111,7 +111,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var (snapshot, source) = PullRequest();
         var (builder, _) = await BuilderAsync();
 
-        await using var prepared = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        await using var prepared = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
 
         var instructions = await File.ReadAllTextAsync(Path.Combine(prepared.Context.AttemptFolder, ReviewContextBuilder.InstructionsFile), Ct);
         Assert.StartsWith("# Core contract", instructions, StringComparison.Ordinal);
@@ -125,8 +125,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var (snapshot, source) = PullRequest();
         var (builder, _) = await BuilderAsync();
 
-        await using var prepared = await builder.PrepareAsync(
-            snapshot, source, "bob", Instructions(RepoAgentFileMode.Ignore), TimeSpan.FromMinutes(5), Ct);
+        await using var prepared = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(RepoAgentFileMode.Ignore), TimeSpan.FromMinutes(5), Ct);
 
         var instructions = await File.ReadAllTextAsync(Path.Combine(prepared.Context.AttemptFolder, ReviewContextBuilder.InstructionsFile), Ct);
         Assert.DoesNotContain("Base branch notes.", instructions, StringComparison.Ordinal);
@@ -138,7 +137,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var (snapshot, source) = PullRequest();
         var (builder, _) = await BuilderAsync();
 
-        var prepared = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        var prepared = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
         await prepared.DisposeAsync();
 
         Assert.False(Directory.Exists(prepared.Context.WorktreePath));
@@ -153,7 +152,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var moved = snapshot with { HeadSha = new string('a', 40) };
 
         await Assert.ThrowsAsync<GitException>(() =>
-            builder.PrepareAsync(moved, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct));
+            builder.PrepareAsync(builder.NewJobId(moved.Ref), moved, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct));
 
         Assert.False(Directory.Exists(Path.Combine(_paths.Jobs, "20261030-120000-acme-app-7", "worktree-1")));
     }
@@ -164,8 +163,8 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var (snapshot, source) = PullRequest();
         var (builder, _) = await BuilderAsync();
 
-        await using var first = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
-        await using var second = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        await using var first = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        await using var second = await builder.PrepareAsync(builder.NewJobId(snapshot.Ref), snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
 
         Assert.Equal(first.JobFolder, second.JobFolder);
         Assert.EndsWith("2", second.Context.AttemptFolder, StringComparison.Ordinal);
