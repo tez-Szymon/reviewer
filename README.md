@@ -6,7 +6,7 @@ A local-first, per-person AI code reviewer. A .NET engine on your machine polls 
 
 ## Status
 
-M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code. It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is in progress: `~/.reviewer/config.yaml` now sets the review mode (`comment`, `approve`, `gate`), thresholds, skills and accounts, globally and per repo. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
+M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code. It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is in progress: `~/.reviewer/config.yaml` now sets the review mode (`comment`, `approve`, `gate`), thresholds, skills and accounts, globally and per repo, and every review is recorded in a local SQLite database. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
 
 | Milestone | Scope | Status |
 |---|---|---|
@@ -25,6 +25,13 @@ dotnet test Reviewer.slnx
 dotnet run --project src/Reviewer.Cli -- --help
 ```
 
+After changing the database model in `src/Reviewer.Engine/State`, add a migration:
+
+```bash
+dotnet tool restore
+dotnet ef migrations add <Name> --project src/Reviewer.Engine --startup-project src/Reviewer.Engine --output-dir State/Migrations
+```
+
 ## Usage
 
 Needs Claude Code logged in (`claude auth login`) and a GitHub token from `GITHUB_TOKEN` or `gh auth login`.
@@ -34,11 +41,13 @@ reviewer status                                         # agent and GitHub accou
 reviewer review https://github.com/acme/api/pull/7 --dry-run   # show the plan only
 reviewer review https://github.com/acme/api/pull/7             # post the review
 reviewer review <url> --dry-run --min-confidence 0.4           # see what a lower threshold adds
+reviewer history --repo acme/api                        # past reviews, newest first
+reviewer show 20261030-1200                             # one review with its findings (id or unique start)
 reviewer config validate                                # check config.yaml
 reviewer config show acme/api                           # the merged settings a review of acme/api uses
 ```
 
-State lives in `~/.reviewer` (or `REVIEWER_HOME`): `config.yaml`, job folders with the agent's inputs, output and `plan.json`, and one bare repository per reviewed repo. Without `config.yaml` the built-in defaults apply: comment mode, and Markdown skills from `~/.reviewer/skills/*.md`. A minimal config:
+State lives in `~/.reviewer` (or `REVIEWER_HOME`): `config.yaml`, `reviewer.db` with every job and its findings, job folders with the agent's inputs, output and `plan.json`, and one bare repository per reviewed repo. Without `config.yaml` the built-in defaults apply: comment mode, and Markdown skills from `~/.reviewer/skills/*.md`. A minimal config:
 
 ```yaml
 defaults:

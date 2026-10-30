@@ -71,7 +71,9 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
     /// <exception cref="GitException">
     /// Fetching failed, or the snapshot's head is no longer reachable (force-pushed since the snapshot was taken).
     /// </exception>
+    /// <param name="jobId">From <see cref="NewJobId"/>; names the job folder.</param>
     public async Task<PreparedReview> PrepareAsync(
+        string jobId,
         PullRequestSnapshot snapshot,
         ReviewSource source,
         string tokenOwner,
@@ -87,7 +89,6 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
             source.Credential,
             ct).ConfigureAwait(false);
 
-        var jobId = JobId(pr);
         var jobFolder = Path.Combine(paths.Jobs, jobId);
         var attempt = CreateAttempt(jobFolder);
         // One worktree per attempt, so two runs that land in the same job folder can't collide.
@@ -154,7 +155,8 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         }
     }
 
-    private string JobId(PullRequestRef pr)
+    /// <summary>A readable, sortable id such as <c>20261030-120000-acme-app-7</c>, safe as a folder name.</summary>
+    public string NewJobId(PullRequestRef pr)
     {
         var stamp = time.GetUtcNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         var name = $"{stamp}-{pr.Repo.Owner}-{pr.Repo.Name}-{pr.Number}";

@@ -14,6 +14,9 @@ public sealed record ReviewerPaths(string Root)
     /// <summary><c>config.yaml</c>; without it the built-in defaults apply.</summary>
     public string Config => Path.Combine(Root, Engine.Config.ConfigLoader.FileName);
 
+    /// <summary>The SQLite database with jobs, findings and each PR's last review.</summary>
+    public string Database => Path.Combine(Root, State.ReviewStore.FileName);
+
     /// <summary>Per-job folders: worktree plus numbered attempt folders.</summary>
     public string Jobs => Path.Combine(Root, "jobs");
 
