@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Findings\findings.schema.json" LogicalName="Reviewer.Core.findings.schema.json" />
   </ItemGroup>
 

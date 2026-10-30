@@ -63,16 +63,18 @@ Git operations are shared; the PR/MR layer is per provider behind one interface 
 public interface IRepositoryProvider
 {
     ProviderCapabilities Capabilities { get; }
+    Task<string> GetCurrentUserAsync(CancellationToken ct);
     IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct);
     IAsyncEnumerable<PullRequestRef> ListCandidatesAsync(RepoRef repo, TriggerFilter filter, CancellationToken ct);
     Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct);
     Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct);
     Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct);
     Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, CancellationToken ct);
-    Task SetDecisionAsync(PullRequestRef pr, ReviewDecision decision, CancellationToken ct);
     Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct);
 }
 ```
+
+`PublishReviewAsync` posts the summary, inline comments and decision together, bound to the reviewed head SHA, so an approval never covers commits pushed after the review. `GetCurrentUserAsync` returns the token owner for the self-PR rule.
 
 `PullRequestSnapshot` carries head/base SHAs, author, assignees, requested reviewers, labels, draft flag, CI state and mergeability. Each adapter maps its own model into it.
 
@@ -135,6 +137,8 @@ Run steps:
 6. Detect rate-limit or auth errors from exit code and output → job state `Throttled` with retry time, or `AgentUnavailable`.
 
 Exact CLI flags are confirmed per CLI version in the adapter, and `CheckAsync` reports which output mode the installed version supports.
+
+**Claude Code** (verified on 2.1.312) runs as `claude -p … --restricted --tools Read,Grep,Glob --strict-mcp-config --add-dir <attempt> --output-format json --json-schema <schema> --no-session-persistence`, with the worktree as working directory. `--restricted` is what makes the PR head safe to open: no code-running tools, user/project/local settings files ignored (so a PR can't add hooks through `.claude/settings.json`), the worktree's `CLAUDE.md` not loaded, and file tools confined to the working directories. `CheckAsync` refuses a CLI without it. `--bare` would also skip `CLAUDE.md`, but it limits auth to API keys, so subscriptions couldn't use it. Findings arrive in the result's `structured_output`. The CLI's schema validator rejects a draft 2020-12 `$schema` key, so the runner strips it. The repair round is a fresh call, not a resumed session, so reviews don't fill the user's session history.
 
 Processes are run with CliWrap. Each agent has a concurrency limit, default 1 for subscriptions.
 

@@ -8,7 +8,9 @@
     <Project Path="src/Reviewer.Providers.GitHub/Reviewer.Providers.GitHub.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Reviewer.Agents.Cli.Tests/Reviewer.Agents.Cli.Tests.csproj" />
     <Project Path="tests/Reviewer.Core.Tests/Reviewer.Core.Tests.csproj" />
     <Project Path="tests/Reviewer.Git.Tests/Reviewer.Git.Tests.csproj" />
+    <Project Path="tests/Reviewer.Providers.GitHub.Tests/Reviewer.Providers.GitHub.Tests.csproj" />
   </Folder>
 </Solution>
