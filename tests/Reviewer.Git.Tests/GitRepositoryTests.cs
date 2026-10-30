@@ -183,4 +183,20 @@ public sealed class GitRepositoryTests : IDisposable
         Assert.Equal(before[original], after[rebasedChange]);
         Assert.Single(before);
     }
+
+    [Fact]
+    public async Task ReadFile_ReturnsContentAtCommit_OrNullWhenMissing()
+    {
+        _source.Write("docs/CLAUDE.md", "old");
+        var first = _source.Commit("first");
+        _source.Write("docs/CLAUDE.md", "new");
+        _source.Commit("second");
+        var repo = await CacheAsync();
+
+        var content = await repo.ReadFileAsync(first, "docs/CLAUDE.md", Ct);
+        var missing = await repo.ReadFileAsync(first, "AGENTS.md", Ct);
+
+        Assert.Equal("old\n", content);
+        Assert.Null(missing);
+    }
 }

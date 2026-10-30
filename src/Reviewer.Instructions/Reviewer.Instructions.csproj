@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
+  </ItemGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Resources\**\*.md" LogicalName="Reviewer.Instructions.%(Filename)%(Extension)" />
   </ItemGroup>
+
 </Project>
