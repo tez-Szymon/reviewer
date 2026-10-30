@@ -6,14 +6,14 @@ A local-first, per-person AI code reviewer. A .NET engine on your machine polls 
 
 ## Status
 
-M1 in progress: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code in comment mode, using built-in defaults (config files come in M2). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
+M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code in comment mode, using built-in defaults (config files come in M2). It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is next. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
 
-| Milestone | Scope |
-|---|---|
-| M1 · Core review loop | GitHub adapter, worktrees, Claude Code, findings schema, policy engine, `reviewer review <url>` |
-| M2 · Engine, automation | Polling, triggers, job queue, SQLite state, delta review, local API |
-| M3 · Desktop and GitLab | Avalonia app, GitLab (incl. self-hosted), Codex, OS keychain, `gate-merge` |
-| M4 · API agents, release | `Microsoft.Extensions.AI` agents, signed installers, auto-update, eval set |
+| Milestone | Scope | Status |
+|---|---|---|
+| M1 · Core review loop | GitHub adapter, worktrees, Claude Code, findings schema, policy engine, `reviewer review <url>` | Done |
+| M2 · Engine, automation | Polling, triggers, job queue, SQLite state, delta review, local API | Next |
+| M3 · Desktop and GitLab | Avalonia app, GitLab (incl. self-hosted), Codex, OS keychain, `gate-merge` | |
+| M4 · API agents, release | `Microsoft.Extensions.AI` agents, signed installers, auto-update, eval set | |
 
 ## Build
 
