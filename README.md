@@ -6,12 +6,12 @@ A local-first, per-person AI code reviewer. A .NET engine on your machine polls 
 
 ## Status
 
-M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code in comment mode, using built-in defaults (config files come in M2). It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is next. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
+M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code. It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is in progress: `~/.reviewer/config.yaml` now sets the review mode (`comment`, `approve`, `gate`), thresholds, skills and accounts, globally and per repo. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
 
 | Milestone | Scope | Status |
 |---|---|---|
 | M1 · Core review loop | GitHub adapter, worktrees, Claude Code, findings schema, policy engine, `reviewer review <url>` | Done |
-| M2 · Engine, automation | Polling, triggers, job queue, SQLite state, delta review, local API | Next |
+| M2 · Engine, automation | Config, polling, triggers, job queue, SQLite state, delta review, local API | In progress |
 | M3 · Desktop and GitLab | Avalonia app, GitLab (incl. self-hosted), Codex, OS keychain, `gate-merge` | |
 | M4 · API agents, release | `Microsoft.Extensions.AI` agents, signed installers, auto-update, eval set | |
 
@@ -34,9 +34,22 @@ reviewer status                                         # agent and GitHub accou
 reviewer review https://github.com/acme/api/pull/7 --dry-run   # show the plan only
 reviewer review https://github.com/acme/api/pull/7             # post the review
 reviewer review <url> --dry-run --min-confidence 0.4           # see what a lower threshold adds
+reviewer config validate                                # check config.yaml
+reviewer config show acme/api                           # the merged settings a review of acme/api uses
 ```
 
-State lives in `~/.reviewer` (or `REVIEWER_HOME`): job folders with the agent's inputs, output and `plan.json`, and one bare repository per reviewed repo. Markdown skills in `~/.reviewer/skills/*.md` are added to every review.
+State lives in `~/.reviewer` (or `REVIEWER_HOME`): `config.yaml`, job folders with the agent's inputs, output and `plan.json`, and one bare repository per reviewed repo. Without `config.yaml` the built-in defaults apply: comment mode, and Markdown skills from `~/.reviewer/skills/*.md`. A minimal config:
+
+```yaml
+defaults:
+  review: { minConfidence: 0.5 }
+repos:
+  - repo: acme/api
+    overrides:
+      review: { mode: gate }    # approve when nothing blocks, request changes otherwise
+```
+
+See [Configuration](docs/ARCHITECTURE.md#configuration) for every key.
 
 ## License
 

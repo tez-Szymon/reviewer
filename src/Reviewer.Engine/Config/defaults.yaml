@@ -1,0 +1,38 @@
+# Built-in defaults. The user's config.yaml is merged on top: maps merge key by key, lists and values replace.
+accounts: []
+
+agents:
+  default: claude-code
+  claude-code: { maxConcurrency: 1, timeoutMinutes: 15 }
+  codex: { maxConcurrency: 1, timeoutMinutes: 15 }
+
+defaults:
+  triggers:
+    initial: [assigned-to-me, review-requested]
+    labels: []
+    authors: []
+    reReview: { onNewCommits: true, debounceMinutes: 5, onReassignment: true, onReviewRequested: true }
+    skipDrafts: true
+    targetBranches: []
+    paths: []
+    maxDiffLines: 3000
+  review:
+    mode: comment
+    dryRun: false
+    minConfidence: 0.6
+    blockingRules:
+      - { minSeverity: major, categories: [security, correctness] }
+      - { minSeverity: blocker }
+    maxInlineComments: 20
+    ignorePaths: ["**/*.lock", "**/dist/**", "**/*.min.js"]
+    requestChangesFallback: unresolved-threads
+  merge:
+    method: squash
+    requireGreenCi: true
+  instructions:
+    useDefaultGuide: true
+    skills: ["skills/*.md"]
+    repoSkills: []
+    repoAgentFiles: context
+
+repos: []

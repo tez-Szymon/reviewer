@@ -11,6 +11,9 @@ public sealed record ReviewerPaths(string Root)
             ? home
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".reviewer"));
 
+    /// <summary><c>config.yaml</c>; without it the built-in defaults apply.</summary>
+    public string Config => Path.Combine(Root, Engine.Config.ConfigLoader.FileName);
+
     /// <summary>Per-job folders: worktree plus numbered attempt folders.</summary>
     public string Jobs => Path.Combine(Root, "jobs");
 
