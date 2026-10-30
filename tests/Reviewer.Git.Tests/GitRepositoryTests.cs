@@ -280,4 +280,54 @@ public sealed class GitRepositoryTests : IDisposable
         process.WaitForExit();
         return process.ExitCode == 0 ? output.ReplaceLineEndings("\n") : "";
     }
+
+    [Fact]
+    public async Task PathLimitedDiff_KeepsOnlyThosePaths_AndTreatsThemLiterally()
+    {
+        _source.Write("a.txt", "a");
+        _source.Write("[ab].txt", "glob");
+        var from = _source.Commit("base");
+        _source.Write("a.txt", "a2"); // "[ab].txt" as a glob would match this.
+        _source.Write("[ab].txt", "glob2");
+        _source.Write("b.txt", "b");
+        var to = _source.Commit("change");
+        var repo = await CacheAsync();
+
+        var changed = await repo.ChangedFilesAsync(from, to, Ct, ["[ab].txt", "b.txt"]);
+        var diff = await repo.DiffAsync(from, to, Ct, ["[ab].txt"]);
+
+        Assert.Equal(["[ab].txt", "b.txt"], changed.Select(f => f.Path));
+        Assert.Contains("+glob2", diff, StringComparison.Ordinal);
+        Assert.DoesNotContain("a2", diff, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Commits_AreOldestFirst_HasCommitAndUpdateRefWork()
+    {
+        var first = _source.Commit("first");
+        var second = _source.Commit("second");
+        var third = _source.Commit("third");
+        var repo = await CacheAsync();
+
+        Assert.Equal([second, third], await repo.CommitsAsync($"{first}..{third}", Ct));
+        Assert.True(await repo.HasCommitAsync(second, Ct));
+        Assert.False(await repo.HasCommitAsync(new string('0', 40), Ct));
+
+        await repo.UpdateRefAsync("refs/reviewer/pr/1/reviewed", second, Ct);
+        Assert.Equal([second], await repo.CommitsAsync($"{first}..refs/reviewer/pr/1/reviewed", Ct));
+    }
+
+    [Fact]
+    public async Task ChangedOldLines_MapToTheOlderRevision()
+    {
+        _source.Write("f.txt", "1", "2", "3", "4");
+        var from = _source.Commit("base");
+        _source.Write("f.txt", "0", "1", "2", "THREE", "4");
+        var to = _source.Commit("change");
+        var repo = await CacheAsync();
+
+        var lines = await repo.ChangedOldLinesAsync(from, to, Ct);
+
+        Assert.Equal([new LineSpan(1, 0), new LineSpan(3, 3)], lines["f.txt"]);
+    }
 }

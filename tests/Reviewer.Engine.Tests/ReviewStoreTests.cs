@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Reviewer.Core.Findings;
 using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
@@ -28,8 +31,11 @@ public sealed class ReviewStoreTests : IDisposable
         var snapshot = new PullRequestSnapshot(Pr, "t", "", head, "base1", "main", "alice", [], [], [], false, CiState.Success, true);
         var plan = new ReviewPlan("s", findings.Take(1).ToList(), findings.Skip(1).Take(1).ToList(), [.. findings.Take(1).Select(f => f.Id)], [],
             ReviewDecision.Approve, Merge: false, UnresolvedThreads: false, []);
-        return new ReviewOutcome(jobId, "/tmp/attempt", snapshot, new FindingsReport("Summary.", findings), plan, published);
+        return new ReviewOutcome(
+            jobId, "/tmp/attempt", snapshot, new ReviewDelta(DeltaKind.Full, "base1", null, "First."), new FindingsReport("Summary.", findings), plan, published);
     }
+
+    private static readonly ReviewedState State = new("head", ["p1"], new Dictionary<string, string> { ["a.cs"] = "f1" });
 
     private static Finding Finding(string id) => new(id, Severity.Major, Category.Correctness, 0.9, "a.cs", 1, 2, "T", "B");
 
@@ -62,11 +68,11 @@ public sealed class ReviewStoreTests : IDisposable
         var first = await store.StartJobAsync(Job("j1"), Ct);
         var a = Finding("a");
         var b = Finding("b") with { File = "b.cs" };
-        await store.CompleteJobAsync(first, Outcome(first, "head1", published: true, a, b, Finding("c")), new Dictionary<Finding, string> { [a] = "fpa", [b] = "fpb" }, Ct);
+        await store.CompleteJobAsync(first, Outcome(first, "head1", published: true, a, b, Finding("c")), new Dictionary<Finding, string> { [a] = "fpa", [b] = "fpb" }, State, [], Ct);
 
         _time.Now = _time.Now.AddHours(1);
         var second = await store.StartJobAsync(Job("j2"), Ct);
-        await store.CompleteJobAsync(second, Outcome(second, "head2", published: true), new Dictionary<Finding, string>(), Ct);
+        await store.CompleteJobAsync(second, Outcome(second, "head2", published: true), new Dictionary<Finding, string>(), State, [], Ct);
 
         var details = (await store.GetJobAsync(first, Ct))!;
         Assert.Equal(ReviewDecision.Approve, details.Job.Decision);
@@ -106,7 +112,7 @@ public sealed class ReviewStoreTests : IDisposable
         }
 
         var a = Finding("a");
-        await store.CompleteJobAsync("j3", Outcome("j3", "h", false, a, Finding("b"), Finding("c")), new Dictionary<Finding, string> { [a] = "fp" }, Ct);
+        await store.CompleteJobAsync("j3", Outcome("j3", "h", false, a, Finding("b"), Finding("c")), new Dictionary<Finding, string> { [a] = "fp" }, State, [], Ct);
 
         var jobs = await store.ListJobsAsync("Acme/API", 10, Ct);
 
@@ -128,7 +134,55 @@ public sealed class ReviewStoreTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.GetJobAsync("20261030", Ct));
     }
 
-    private sealed class ManualTime(DateTimeOffset now) : TimeProvider
+[Fact]
+    public async Task Open_UpgradesADatabaseFromBeforeDeltaReview_KeepingItsRows()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(DbPath)!);
+        await using (var db = new ReviewerDb(ReviewerDb.Options(DbPath)))
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261030124209_Initial", Ct);
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO Jobs (Id, Host, Repo, Number, ConfigHash, AgentId, AppVersion, State, DryRun, Published, CreatedAt)
+                VALUES ('j1', 'https://github.com', 'acme/api', 7, 'h', 'claude-code', 'old', 'Succeeded', 0, 1, 0);
+                INSERT INTO PullRequests (Host, Repo, Number, LastReviewedHead, LastReviewedBase, LastReviewedAt, LastJobId)
+                VALUES ('https://github.com', 'acme/api', 7, 'head1', 'base1', 0, 'j1');
+                """, Ct);
+        }
+
+        var store = await ReviewStore.OpenAsync(DbPath, _time, Ct);
+        var previous = (await store.GetPreviousReviewAsync(Pr, Ct))!;
+
+        Assert.Equal("head1", previous.State.HeadSha);
+        Assert.Equal("h", previous.ConfigHash);
+        Assert.Empty(previous.State.CommitPatchIds);
+        Assert.Empty(previous.State.FilePatchIds);
+    }
+
+    [Fact]
+    public async Task OpenFindings_ArePostedOnesOfPublishedJobs_UntilResolved()
+    {
+        var store = await ReviewStore.OpenAsync(DbPath, _time, Ct);
+        var a = Finding("a");
+        var b = Finding("b") with { File = "b.cs" };
+        var first = await store.StartJobAsync(Job("j1"), Ct);
+        await store.CompleteJobAsync(first, Outcome(first, "head1", published: true, a, b, Finding("dropped")), new Dictionary<Finding, string> { [a] = "fpa", [b] = "fpb" }, State, [], Ct);
+        var dry = await store.StartJobAsync(Job("j2"), Ct);
+        var c = Finding("c");
+        await store.CompleteJobAsync(dry, Outcome(dry, "head2", published: false, c), new Dictionary<Finding, string> { [c] = "fpc" }, State, [], Ct);
+
+        var open = await store.GetOpenFindingsAsync(Pr, Ct);
+        Assert.Equal(["fpa", "fpb"], open.Select(o => o.Fingerprint));
+        Assert.Equal(("head1", true), (open[0].HeadSha, open[0].Blocking));
+
+        var third = await store.StartJobAsync(Job("j3"), Ct);
+        await store.CompleteJobAsync(third, Outcome(third, "head3", published: true), new Dictionary<Finding, string>(), State, ["fpa"], Ct);
+
+        Assert.Equal("fpb", Assert.Single(await store.GetOpenFindingsAsync(Pr, Ct)).Fingerprint);
+        Assert.Equal(["p1"], (await store.GetPreviousReviewAsync(Pr, Ct))!.State.CommitPatchIds);
+        Assert.Equal("f1", (await store.GetPreviousReviewAsync(Pr, Ct))!.State.FilePatchIds["a.cs"]);
+    }
+
+        private sealed class ManualTime(DateTimeOffset now) : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = now;
 

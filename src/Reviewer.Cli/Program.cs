@@ -1,6 +1,8 @@
 using System.CommandLine;
+using System.Data.Common;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Reviewer.Agents.Cli;
 using Reviewer.Cli;
 using Reviewer.Core.Agents;
@@ -27,6 +29,7 @@ var prUrl = new Argument<Uri>("pr-url")
     },
 };
 var dryRun = new Option<bool>("--dry-run") { Description = "Show the review plan without publishing it" };
+var full = new Option<bool>("--full") { Description = "Review the whole PR, not only what's new since the last review" };
 var agent = new Option<string?>("--agent") { Description = "Agent to use instead of the configured one" };
 var model = new Option<string?>("--model") { Description = "Model for the agent, e.g. sonnet or opus; overrides the config" };
 var minConfidence = new Option<double?>("--min-confidence")
@@ -51,7 +54,7 @@ var paths = ReviewerPaths.Default;
 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 var configJson = new JsonSerializerOptions(ConfigLoader.JsonOptions) { WriteIndented = true };
 
-var review = new Command("review", "Review one pull request now") { prUrl, dryRun, agent, model, minConfidence };
+var review = new Command("review", "Review one pull request now") { prUrl, dryRun, full, agent, model, minConfidence };
 review.SetAction(async (parse, ct) =>
 {
     if (!GitHubUrls.TryParsePullRequest(parse.GetValue(prUrl)!, out var pr))
@@ -75,6 +78,8 @@ review.SetAction(async (parse, ct) =>
         return Fail(e.Message);
     }
 
+    // The overrides go into the hash too: they change what a review keeps, so a head reviewed without them isn't done.
+    effective = effective.WithOverrides(parse.GetValue(model), parse.GetValue(minConfidence));
     if (effective.AgentId != AgentsConfig.ClaudeCodeId)
     {
         return Fail($"Agent '{effective.AgentId}' is not available yet; use claude-code.");
@@ -92,7 +97,7 @@ review.SetAction(async (parse, ct) =>
         var reviewer = new ReviewRunner(
             new GitHubProvider(http),
             new ReviewContextBuilder(git, paths, TimeProvider.System),
-            new ClaudeCodeAgent(new ClaudeCodeOptions(Model: parse.GetValue(model) ?? effective.Agent.Model), runner),
+            new ClaudeCodeAgent(new ClaudeCodeOptions(Model: effective.Agent.Model), runner),
             await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct));
         var policy = effective.Policy.ToReviewPolicy();
         var request = new ReviewRequest(
@@ -102,11 +107,11 @@ review.SetAction(async (parse, ct) =>
             {
                 // The flag can turn a dry run on, never off: a repo set to dry run stays unpublished.
                 DryRun = policy.DryRun || parse.GetValue(dryRun),
-                MinConfidence = parse.GetValue(minConfidence) ?? policy.MinConfidence,
             },
             await effective.Policy.Instructions.LoadAsync(paths, home, ct),
             effective.Agent.Timeout,
-            effective.Hash);
+            effective.Hash,
+            parse.GetValue(full));
 
         Console.Error.WriteLine($"Reviewing {pr.Repo}#{pr.Number}; this can take several minutes...");
         ReviewPrinter.Print(await reviewer.RunAsync(request, ct), Console.Out);
@@ -120,6 +125,10 @@ review.SetAction(async (parse, ct) =>
     {
         return Fail(e.Message);
     }
+    catch (Exception e) when (e is DbException or DbUpdateException)
+    {
+        return Fail(DatabaseError(paths, e));
+    }
 });
 
 var historyRepo = new Option<string?>("--repo") { Description = "Only this repo, as owner/name" };
@@ -132,18 +141,25 @@ history.SetAction(async (parse, ct) =>
         return Fail("--limit must be at least 1.");
     }
 
-    var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
-    HistoryPrinter.PrintList(await store.ListJobsAsync(parse.GetValue(historyRepo), parse.GetValue(limit), ct), Console.Out);
-    return 0;
+    try
+    {
+        var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+        HistoryPrinter.PrintList(await store.ListJobsAsync(parse.GetValue(historyRepo), parse.GetValue(limit), ct), Console.Out);
+        return 0;
+    }
+    catch (Exception e) when (e is DbException or DbUpdateException)
+    {
+        return Fail(DatabaseError(paths, e));
+    }
 });
 
 var jobId = new Argument<string>("job-id") { Description = "A job id from 'reviewer history', or its unique start" };
 var showJob = new Command("show", "Show one past review with its findings") { jobId };
 showJob.SetAction(async (parse, ct) =>
 {
-    var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
     try
     {
+        var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
         if (await store.GetJobAsync(parse.GetValue(jobId)!, ct) is not { } details)
         {
             return Fail($"No job '{parse.GetValue(jobId)}'. See 'reviewer history'.");
@@ -155,6 +171,10 @@ showJob.SetAction(async (parse, ct) =>
     catch (InvalidOperationException e)
     {
         return Fail(e.Message);
+    }
+    catch (Exception e) when (e is DbException or DbUpdateException)
+    {
+        return Fail(DatabaseError(paths, e));
     }
 });
 
@@ -259,6 +279,10 @@ static async Task<ReviewerConfig?> LoadConfigAsync(ReviewerPaths paths, Cancella
         return null;
     }
 }
+
+// A review can fail here after it was published (recording the result), so say where to look.
+static string DatabaseError(ReviewerPaths paths, Exception e) =>
+    $"Database error in {paths.Database}: {(e.InnerException ?? e).Message}\nIf a review was running, check the PR: it may have been posted already.";
 
 static int Fail(string message)
 {

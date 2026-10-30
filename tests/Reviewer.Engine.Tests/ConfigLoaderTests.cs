@@ -105,6 +105,19 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void WithOverrides_AppliesModelAndConfidence_AndChangesTheHash()
+    {
+        var effective = ReviewerConfig.Default.For(Api);
+
+        var overridden = effective.WithOverrides("opus", 0.4);
+
+        Assert.Equal("opus", overridden.Agent.Model);
+        Assert.Equal(0.4, overridden.Policy.Review.MinConfidence);
+        Assert.NotEqual(effective.Hash, overridden.Hash);
+        Assert.Equal(effective.Hash, effective.WithOverrides(null, null).Hash);
+    }
+
+    [Fact]
     public void For_MatchesRepoCaseInsensitively()
     {
         var config = ConfigLoader.Parse("repos: [{ repo: Acme/API, overrides: { review: { mode: gate } } }]");
@@ -215,6 +228,7 @@ public class ConfigLoaderTests
     [InlineData("repos: [{ repo: acme/api }, { repo: ACME/api }]", "repos[1].repo: ACME/api is listed twice.")]
     [InlineData("accounts: [{ id: gh }]\nrepos: [{ repo: acme/api }, { repo: acme/api, account: gh }]", "repos[1].repo: acme/api is listed twice.")]
     [InlineData("accounts: [{ id: a }, { id: b }]\nrepos: [{ repo: acme/api }]", "repos[0]: set account")]
+    [InlineData("accounts: [{ id: a }, { id: b }]\nrepos: [{ repo: acme/api, account: a }, { repo: acme/api, account: b }]", "repos[1].repo: acme/api is listed twice.")]
     [InlineData("defaults: { review: { mode: gate } }\ndefaults: {}", "config.yaml:2: Duplicate key defaults")]
     [InlineData("defaults: { review: [", "config.yaml:2: While parsing a node")]
     [InlineData("- a\n- b", "the top level must be a map")]

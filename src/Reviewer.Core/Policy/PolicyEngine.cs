@@ -10,12 +10,17 @@ namespace Reviewer.Core.Policy;
 /// </summary>
 public static class PolicyEngine
 {
+    /// <param name="openFindings">
+    /// Blocking findings from earlier reviews of this PR that are still open. They pass through the current filter and
+    /// blocking rules, and block like new ones wherever they are, since they were in an earlier delta.
+    /// </param>
     public static ReviewPlan Decide(
         FindingsReport report,
         PullRequestSnapshot snapshot,
         ReviewPolicy policy,
         ProviderCapabilities capabilities,
-        ReviewScope scope)
+        ReviewScope scope,
+        IReadOnlyList<Finding>? openFindings = null)
     {
         var reasons = new List<string>();
 
@@ -47,13 +52,24 @@ public static class PolicyEngine
             .ThenByDescending(c => c.Finding.Confidence)
             .ToList();
         var blockingIds = classified.Where(c => c.Blocking).Select(c => c.Finding.Id).ToList();
+
+        // Earlier findings were in an earlier delta, so they aren't held to this one; filter and rules still apply.
+        var openBlocking = (openFindings ?? [])
+            .Where(f => f.Confidence >= policy.MinConfidence && !ignored.Match(f.File).HasMatches && policy.BlockingRules.Any(r => r.Matches(f)))
+            .ToList();
         reasons.Add(blockingIds.Count == 0 ? "No blocking findings." : $"{blockingIds.Count} blocking finding(s).");
+        if (openBlocking.Count > 0)
+        {
+            reasons.Add($"{openBlocking.Count} blocking finding(s) from earlier reviews still open.");
+        }
+
+        var blocked = blockingIds.Count + openBlocking.Count > 0;
 
         var inline = classified.Take(Math.Max(policy.MaxInlineComments, 0)).Select(c => c.Finding).ToList();
         var summaryOnly = classified.Skip(inline.Count).Select(c => c.Finding).Concat(outsideDelta).ToList();
 
         // 3. Decide by mode.
-        var decision = (policy.Mode, blockingIds.Count > 0) switch
+        var decision = (policy.Mode, blocked) switch
         {
             (ReviewMode.Comment, _) => ReviewDecision.None,
             (ReviewMode.Approve, false) => ReviewDecision.Approve,
@@ -98,7 +114,10 @@ public static class PolicyEngine
             decision,
             merge,
             unresolvedThreads,
-            reasons);
+            reasons)
+        {
+            OpenBlockingFindings = openBlocking,
+        };
     }
 
     private static IEnumerable<string> MergeGuardFailures(PullRequestSnapshot snapshot, ReviewScope scope)

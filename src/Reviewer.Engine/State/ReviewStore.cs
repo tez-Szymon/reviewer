@@ -12,6 +12,14 @@ public sealed record JobSummary(JobRecord Job, int Inline, int SummaryOnly, int 
 /// <summary>A job with its findings, in report order.</summary>
 public sealed record JobDetails(JobRecord Job, IReadOnlyList<FindingRecord> Findings);
 
+/// <summary>The PR's last published review: what it covered, and under which config.</summary>
+public sealed record PreviousReview(ReviewedState State, string ConfigHash, string JobId);
+
+/// <summary>A finding posted by an earlier review that hasn't been resolved.</summary>
+/// <param name="HeadSha">The head it was reported against; its lines refer to that commit.</param>
+/// <param name="Blocking">Whether it blocked when it was reported.</param>
+public sealed record OpenFinding(Finding Finding, string Fingerprint, string HeadSha, bool Blocking);
+
 /// <summary>
 /// The engine's persistent state: jobs, their findings, and each PR's last published review. Each call uses its own
 /// short-lived context, so the store is safe to share; SQLite's WAL mode lets a CLI read while the engine writes.
@@ -67,22 +75,34 @@ public sealed class ReviewStore
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
                 return job.Id;
             }
-            catch (DbUpdateException e) when (e.InnerException is SqliteException { SqliteErrorCode: 19 } && n < 100)
+            catch (DbUpdateException e) when (e.InnerException is SqliteException { SqliteExtendedErrorCode: 1555 } && n < 100)
             {
-                job.Id = $"{baseId}-{n}"; // 19 is SQLITE_CONSTRAINT: the id exists.
+                job.Id = $"{baseId}-{n}"; // 1555 is SQLITE_CONSTRAINT_PRIMARYKEY: the id exists. Other constraints aren't retried.
             }
         }
     }
 
-    /// <summary>Notes the PR head and base once the snapshot is read, and the attempt folder once it exists.</summary>
-    public async Task UpdateJobAsync(string jobId, PullRequestSnapshot snapshot, string attemptFolder, CancellationToken ct)
+    /// <summary>Notes the PR head and base, what part of the PR is reviewed and, once it exists, the attempt folder.</summary>
+    public async Task UpdateJobAsync(string jobId, PullRequestSnapshot snapshot, ReviewDelta delta, string? attemptFolder, CancellationToken ct)
     {
         await using var db = new ReviewerDb(_options);
         await db.Jobs.Where(j => j.Id == jobId).ExecuteUpdateAsync(
             set => set
                 .SetProperty(j => j.HeadSha, snapshot.HeadSha)
                 .SetProperty(j => j.BaseSha, snapshot.BaseSha)
+                .SetProperty(j => j.Delta, delta.Kind)
+                .SetProperty(j => j.DeltaFrom, delta.FromSha)
                 .SetProperty(j => j.AttemptFolder, attemptFolder),
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Marks the job skipped: nothing new since the last review.</summary>
+    public async Task SkipJobAsync(string jobId, string reason, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow();
+        await using var db = new ReviewerDb(_options);
+        await db.Jobs.Where(j => j.Id == jobId).ExecuteUpdateAsync(
+            set => set.SetProperty(j => j.State, JobState.Skipped).SetProperty(j => j.Error, reason).SetProperty(j => j.FinishedAt, now),
             ct).ConfigureAwait(false);
     }
 
@@ -90,12 +110,21 @@ public sealed class ReviewStore
     /// Marks the job succeeded with its findings and decision. A published review also becomes the PR's last
     /// reviewed head; a dry run doesn't, since nothing reached the PR.
     /// </summary>
-    /// <param name="fingerprints">Fingerprints of the findings the plan kept.</param>
-    public async Task CompleteJobAsync(string jobId, ReviewOutcome outcome, IReadOnlyDictionary<Finding, string> fingerprints, CancellationToken ct)
+    /// <param name="fingerprints">Fingerprints of the report's findings.</param>
+    /// <param name="state">What this review covered, kept for the next one when it's published.</param>
+    /// <param name="resolved">Fingerprints of earlier findings this review found fixed; marked only when it's published.</param>
+    public async Task CompleteJobAsync(
+        string jobId,
+        ReviewOutcome outcome,
+        IReadOnlyDictionary<Finding, string> fingerprints,
+        ReviewedState state,
+        IReadOnlyCollection<string> resolved,
+        CancellationToken ct)
     {
         var plan = outcome.Plan;
         var inline = plan.InlineFindings.ToHashSet();
         var summary = plan.SummaryFindings.ToHashSet();
+        var posted = plan.AlreadyPosted.ToHashSet();
         var blocking = plan.BlockingFindingIds.ToHashSet(StringComparer.Ordinal);
         var now = _time.GetUtcNow();
 
@@ -103,6 +132,8 @@ public sealed class ReviewStore
         var job = await db.Jobs.SingleAsync(j => j.Id == jobId, ct).ConfigureAwait(false);
         job.State = JobState.Succeeded;
         job.FinishedAt = now;
+        job.HeadSha = outcome.Snapshot.HeadSha; // Open findings' lines refer to it.
+        job.BaseSha = outcome.Snapshot.BaseSha;
         job.Published = outcome.Published;
         job.Decision = plan.Decision;
         job.Summary = outcome.Report.Summary;
@@ -112,6 +143,7 @@ public sealed class ReviewStore
         {
             var disposition = inline.Contains(finding) ? FindingDisposition.Inline
                 : summary.Contains(finding) ? FindingDisposition.Summary
+                : posted.Contains(finding) ? FindingDisposition.AlreadyPosted
                 : FindingDisposition.Dropped;
             job.Findings.Add(new FindingRecord
             {
@@ -152,6 +184,8 @@ public sealed class ReviewStore
                     LastReviewedBase = outcome.Snapshot.BaseSha,
                     LastReviewedAt = now,
                     LastJobId = jobId,
+                    ReviewedCommitPatchIds = [.. state.CommitPatchIds],
+                    ReviewedFilePatchIds = new Dictionary<string, string>(state.FilePatchIds),
                 });
             }
             else
@@ -160,6 +194,18 @@ public sealed class ReviewStore
                 record.LastReviewedBase = outcome.Snapshot.BaseSha;
                 record.LastReviewedAt = now;
                 record.LastJobId = jobId;
+                record.ReviewedCommitPatchIds = [.. state.CommitPatchIds];
+                record.ReviewedFilePatchIds = new Dictionary<string, string>(state.FilePatchIds);
+            }
+
+            if (resolved.Count > 0)
+            {
+                var fixedIds = resolved.ToList();
+                var openRows = await OpenRows(db, pr).Where(f => fixedIds.Contains(f.Fingerprint!)).ToListAsync(ct).ConfigureAwait(false);
+                foreach (var row in openRows)
+                {
+                    row.ResolvedByJobId = jobId;
+                }
             }
         }
 
@@ -227,6 +273,48 @@ public sealed class ReviewStore
         var findings = await db.Findings.AsNoTracking().Where(f => f.JobId == job.Id).OrderBy(f => f.Ordinal).ToListAsync(ct)
             .ConfigureAwait(false);
         return new JobDetails(job, findings);
+    }
+
+    /// <summary>The PR's last published review with the config it ran under, or null if it has none.</summary>
+    public async Task<PreviousReview?> GetPreviousReviewAsync(PullRequestRef pr, CancellationToken ct)
+    {
+        if (await GetPullRequestAsync(pr, ct).ConfigureAwait(false) is not { } record)
+        {
+            return null;
+        }
+
+        await using var db = new ReviewerDb(_options);
+        var hash = await db.Jobs.Where(j => j.Id == record.LastJobId).Select(j => j.ConfigHash).SingleAsync(ct).ConfigureAwait(false);
+        return new PreviousReview(record.ToReviewedState(), hash, record.LastJobId);
+    }
+
+    /// <summary>
+    /// Findings posted by earlier published reviews of the PR that haven't been resolved, one per fingerprint, the
+    /// earliest report of each.
+    /// </summary>
+    public async Task<IReadOnlyList<OpenFinding>> GetOpenFindingsAsync(PullRequestRef pr, CancellationToken ct)
+    {
+        await using var db = new ReviewerDb(_options);
+        var rows = await OpenRows(db, pr)
+            .Join(db.Jobs, f => f.JobId, j => j.Id, (f, j) => new { Finding = f, j.HeadSha, j.CreatedAt })
+            .OrderBy(x => x.CreatedAt).ThenBy(x => x.Finding.Ordinal)
+            .ToListAsync(ct).ConfigureAwait(false);
+        return [.. rows
+            .DistinctBy(x => x.Finding.Fingerprint)
+            .Select(x => new OpenFinding(x.Finding.ToFinding(), x.Finding.Fingerprint!, x.HeadSha!, x.Finding.Blocking))];
+    }
+
+    // Posted (inline or summary) by a published job of this PR, and not resolved since.
+    private static IQueryable<FindingRecord> OpenRows(ReviewerDb db, PullRequestRef pr)
+    {
+        var host = Host(pr.Repo);
+        var repo = pr.Repo.ToString();
+        var jobs = db.Jobs.Where(j => j.Published && j.Host == host && j.Repo == repo && j.Number == pr.Number).Select(j => j.Id);
+        return db.Findings.Where(f =>
+            jobs.Contains(f.JobId)
+            && f.Fingerprint != null
+            && f.ResolvedByJobId == null
+            && (f.Disposition == FindingDisposition.Inline || f.Disposition == FindingDisposition.Summary));
     }
 
     /// <summary>The PR's last published review, or null if it has none.</summary>

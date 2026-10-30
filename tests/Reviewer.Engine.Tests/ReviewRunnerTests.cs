@@ -71,8 +71,8 @@ public sealed class ReviewRunnerTests : IDisposable
         Assert.Equal("outside", Assert.Single(published.SummaryFindings).Id);
         Assert.StartsWith("Looks risky.", published.Summary, StringComparison.Ordinal);
         Assert.Contains("with fake", published.Summary, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(outcome.AttemptFolder, ReviewRunner.PlanFile)));
-        Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(outcome.AttemptFolder)!, "worktree-1")));
+        Assert.True(File.Exists(Path.Combine(outcome.AttemptFolder!, ReviewRunner.PlanFile)));
+        Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(outcome.AttemptFolder!)!, "worktree-1")));
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class ReviewRunnerTests : IDisposable
         Assert.False(outcome.Published);
         Assert.Empty(provider.Published);
         Assert.Single(outcome.Plan.InlineFindings);
-        Assert.True(File.Exists(Path.Combine(outcome.AttemptFolder, ReviewRunner.PlanFile)));
+        Assert.True(File.Exists(Path.Combine(outcome.AttemptFolder!, ReviewRunner.PlanFile)));
     }
 
     [Fact]
@@ -200,34 +200,5 @@ public sealed class ReviewRunnerTests : IDisposable
             Assert.True(File.Exists(Path.Combine(context.AttemptFolder, ReviewContextBuilder.DeltaFile)));
             return report is null ? throw error ?? new AgentFailedException("boom") : Task.FromResult(report);
         }
-    }
-
-    private sealed class FakeProvider(PullRequestSnapshot snapshot) : IRepositoryProvider
-    {
-        public List<ReviewResult> Published { get; } = [];
-
-        public ProviderCapabilities Capabilities { get; } = new(true, true, true, false);
-
-        public Task<string> GetCurrentUserAsync(CancellationToken ct) => Task.FromResult("bob");
-
-        public Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct) => Task.FromResult(snapshot);
-
-        public Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct)
-        {
-            Published.Add(result);
-            return Task.CompletedTask;
-        }
-
-        public IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct) => throw new NotSupportedException();
-
-        public IAsyncEnumerable<PullRequestRef> ListCandidatesAsync(RepoRef repo, TriggerFilter filter, CancellationToken ct) =>
-            throw new NotSupportedException();
-
-        public Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct) =>
-            throw new NotSupportedException();
-
-        public Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct) => throw new NotSupportedException();
     }
 }

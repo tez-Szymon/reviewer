@@ -300,9 +300,13 @@ public static partial class ConfigLoader
             errors.Add($"{path}.agent", $"must be one of: {string.Join(", ", AgentsConfig.Known)}.");
         }
 
-        // Compare the accounts the entries resolve to: with one account, naming it and leaving it out are the same.
-        string? Resolved(RepoEntry r) => r.Account ?? (accounts.Count == 1 ? accounts[0].Id : null);
-        if (earlier.Any(r => Resolved(r) == Resolved(entry) && string.Equals(r.Repo, entry.Repo, StringComparison.OrdinalIgnoreCase)))
+        // Compare the hosts the entries' accounts point at: a PR URL names a host, not an account, so two entries for
+        // one repo on one host can't both be found, whichever accounts they name.
+        Uri? Host(RepoEntry r) =>
+            (r.Account is null ? (accounts.Count == 1 ? accounts[0] : null) : accounts.FirstOrDefault(a => a.Id == r.Account))?.Host;
+        if (Host(entry) is { } host
+            && earlier.Any(r => Host(r) is { } other && ReviewerConfig.SameHost(other, host)
+                && string.Equals(r.Repo, entry.Repo, StringComparison.OrdinalIgnoreCase)))
         {
             errors.Add($"{path}.repo", $"{entry.Repo} is listed twice.");
         }

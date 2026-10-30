@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Reviewer.Core.Findings;
@@ -11,6 +13,9 @@ public enum JobState
 {
     Queued,
     Running,
+
+    /// <summary>Nothing new to review since the last published review; the agent wasn't run.</summary>
+    Skipped,
 
     /// <summary>The agent hit a usage or rate limit; the job can run again after <see cref="JobRecord.RetryAt"/>.</summary>
     Throttled,
@@ -38,6 +43,12 @@ public sealed class JobRecord
 
     public string? BaseSha { get; set; }
 
+    /// <summary>What part of the PR was reviewed; null until planned.</summary>
+    public DeltaKind? Delta { get; set; }
+
+    /// <summary>The delta's starting commit: the merge base for a full review, or the last reviewed point.</summary>
+    public string? DeltaFrom { get; set; }
+
     public required string ConfigHash { get; set; }
 
     public required string AgentId { get; set; }
@@ -57,7 +68,7 @@ public sealed class JobRecord
     /// <summary>The agent's summary, for history.</summary>
     public string? Summary { get; set; }
 
-    /// <summary>Why the job failed, was throttled or cancelled.</summary>
+    /// <summary>Why the job failed, was throttled, cancelled or skipped.</summary>
     public string? Error { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
@@ -84,6 +95,9 @@ public enum FindingDisposition
 
     /// <summary>Filtered out: below the confidence threshold, in an ignored path, or not in the delta's files.</summary>
     Dropped,
+
+    /// <summary>Kept, but the PR already has it from an earlier review, so it wasn't posted again.</summary>
+    AlreadyPosted,
 }
 
 /// <summary>A finding as the agent reported it, with what the policy engine did with it.</summary>
@@ -124,6 +138,11 @@ public sealed class FindingRecord
 
     public bool Blocking { get; set; }
 
+    /// <summary>
+    /// The job that found this posted finding fixed: its code changed and it wasn't reported again. Null while open.
+    /// </summary>
+    public string? ResolvedByJobId { get; set; }
+
     public Finding ToFinding() => new(FindingId, Severity, Category, Confidence, File, StartLine, EndLine, Title, Body, Suggestion);
 }
 
@@ -145,6 +164,14 @@ public sealed class PullRequestRecord
     public DateTimeOffset LastReviewedAt { get; set; }
 
     public required string LastJobId { get; set; }
+
+    /// <summary>Patch-ids of the PR's commits at the last review, oldest first, for matching them after a rebase.</summary>
+    public List<string> ReviewedCommitPatchIds { get; set; } = [];
+
+    /// <summary>Per-file hash of the PR's change at the last review, for skipping files a rewrite left alone.</summary>
+    public Dictionary<string, string> ReviewedFilePatchIds { get; set; } = [];
+
+    public ReviewedState ToReviewedState() => new(LastReviewedHead, ReviewedCommitPatchIds, ReviewedFilePatchIds);
 }
 
 /// <summary>The engine's SQLite database, <c>reviewer.db</c> in the data folder.</summary>
@@ -200,6 +227,13 @@ public sealed class ReviewerDb(DbContextOptions<ReviewerDb> options) : DbContext
             pr.Property(p => p.Repo).UseCollation("NOCASE");
             pr.HasKey(p => p.Key);
             pr.HasIndex(p => new { p.Host, p.Repo, p.Number }).IsUnique();
+            pr.Property(p => p.ReviewedFilePatchIds).HasConversion(
+                v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                v => JsonSerializer.Deserialize<Dictionary<string, string>>(v, (JsonSerializerOptions?)null) ?? new Dictionary<string, string>(),
+                new ValueComparer<Dictionary<string, string>>(
+                    (a, b) => a!.Count == b!.Count && !a.Except(b).Any(),
+                    v => v.Aggregate(0, (hash, pair) => hash ^ HashCode.Combine(pair.Key, pair.Value)),
+                    v => new Dictionary<string, string>(v)));
         });
     }
 
