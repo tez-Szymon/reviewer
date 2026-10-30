@@ -67,9 +67,9 @@ public sealed class ReviewStore
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
                 return job.Id;
             }
-            catch (DbUpdateException e) when (e.InnerException is SqliteException { SqliteErrorCode: 19 } && n < 100)
+            catch (DbUpdateException e) when (e.InnerException is SqliteException { SqliteExtendedErrorCode: 1555 } && n < 100)
             {
-                job.Id = $"{baseId}-{n}"; // 19 is SQLITE_CONSTRAINT: the id exists.
+                job.Id = $"{baseId}-{n}"; // 1555 is SQLITE_CONSTRAINT_PRIMARYKEY: the id exists. Other constraints aren't retried.
             }
         }
     }

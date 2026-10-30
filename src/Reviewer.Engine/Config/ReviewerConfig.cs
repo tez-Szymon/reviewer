@@ -172,7 +172,16 @@ public sealed record InstructionsConfig(
 /// Identifies the settings that shape a review's result: agent and policy, but not triggers. Part of the key that
 /// says whether a PR head has already been reviewed.
 /// </param>
-public sealed record EffectiveConfig(AccountConfig Account, string AgentId, AgentSettings Agent, PolicyConfig Policy, string Hash);
+public sealed record EffectiveConfig(AccountConfig Account, string AgentId, AgentSettings Agent, PolicyConfig Policy, string Hash)
+{
+    /// <summary>The same config with command-line overrides applied, and a hash that includes them.</summary>
+    public EffectiveConfig WithOverrides(string? model, double? minConfidence)
+    {
+        var agent = Agent with { Model = model ?? Agent.Model };
+        var policy = Policy with { Review = Policy.Review with { MinConfidence = minConfidence ?? Policy.Review.MinConfidence } };
+        return this with { Agent = agent, Policy = policy, Hash = ConfigLoader.Hash(AgentId, agent, policy) };
+    }
+}
 
 /// <summary>The config file is invalid. Each error names the key and, when known, the line.</summary>
 public sealed class ConfigException(IReadOnlyList<string> errors) : Exception(string.Join("\n", errors))
