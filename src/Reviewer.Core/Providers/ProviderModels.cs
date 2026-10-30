@@ -50,8 +50,14 @@ public sealed record PublishedComment(string ProviderId, string Fingerprint, str
 /// <summary>A finding to post inline, with the fingerprint the engine computed for dedup across runs.</summary>
 public sealed record InlineComment(Finding Finding, string Fingerprint);
 
+/// <param name="SummaryFindings">Findings listed in the review body only: outside the delta or over the inline limit.</param>
 /// <param name="HeadSha">The commit that was reviewed. The decision applies to this commit only.</param>
-public sealed record ReviewResult(string Summary, IReadOnlyList<InlineComment> Comments, ReviewDecision Decision, string HeadSha);
+public sealed record ReviewResult(
+    string Summary,
+    IReadOnlyList<InlineComment> Comments,
+    IReadOnlyList<Finding> SummaryFindings,
+    ReviewDecision Decision,
+    string HeadSha);
 
 public enum ReviewDecision
 {

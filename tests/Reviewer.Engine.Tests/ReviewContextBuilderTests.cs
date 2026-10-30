@@ -153,7 +153,22 @@ public sealed class ReviewContextBuilderTests : IDisposable
         await Assert.ThrowsAsync<GitException>(() =>
             builder.PrepareAsync(moved, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct));
 
-        Assert.False(Directory.Exists(Path.Combine(_paths.Jobs, "20261030-120000-acme-app-7", "worktree")));
+        Assert.False(Directory.Exists(Path.Combine(_paths.Jobs, "20261030-120000-acme-app-7", "worktree-1")));
+    }
+
+    [Fact]
+    public async Task Prepare_TwiceInTheSameSecond_UsesSeparateAttemptsAndWorktrees()
+    {
+        var (snapshot, source) = PullRequest();
+        var (builder, _) = await BuilderAsync();
+
+        await using var first = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+        await using var second = await builder.PrepareAsync(snapshot, source, "bob", Instructions(), TimeSpan.FromMinutes(5), Ct);
+
+        Assert.Equal(first.JobFolder, second.JobFolder);
+        Assert.EndsWith("2", second.Context.AttemptFolder, StringComparison.Ordinal);
+        Assert.NotEqual(first.Context.WorktreePath, second.Context.WorktreePath);
+        Assert.True(Directory.Exists(second.Context.WorktreePath));
     }
 
     private sealed class FixedTime(DateTimeOffset now) : TimeProvider

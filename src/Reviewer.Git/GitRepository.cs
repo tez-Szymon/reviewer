@@ -35,8 +35,40 @@ public sealed class GitRepository : IGitRepository
         return repo;
     }
 
-    public Task FetchAsync(string remoteUrl, IReadOnlyList<string> refspecs, CancellationToken ct) =>
-        RunAsync(["fetch", "--quiet", "--no-tags", "--force", "--", remoteUrl, .. refspecs], ct);
+    public async Task FetchAsync(string remoteUrl, IReadOnlyList<string> refspecs, GitCredential? credential, CancellationToken ct)
+    {
+        IReadOnlyList<string> args = ["fetch", "--quiet", "--no-tags", "--force", "--", remoteUrl, .. refspecs];
+        var result = await RunRawAsync(args, null, ct, CredentialEnvironment(credential)).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            throw Failure(args, result);
+        }
+    }
+
+    /// <summary>
+    /// Git config passed through the environment: drops every configured credential helper (the user's keychain must
+    /// not answer for the engine) and, with a credential, adds one that reads it from environment variables. The
+    /// secret never appears in arguments, where other processes could see it.
+    /// </summary>
+    internal static Dictionary<string, string?> CredentialEnvironment(GitCredential? credential)
+    {
+        var env = new Dictionary<string, string?>
+        {
+            ["GIT_CONFIG_COUNT"] = credential is null ? "1" : "2",
+            ["GIT_CONFIG_KEY_0"] = "credential.helper",
+            ["GIT_CONFIG_VALUE_0"] = "",
+        };
+        if (credential is not null)
+        {
+            env["GIT_CONFIG_KEY_1"] = "credential.helper";
+            env["GIT_CONFIG_VALUE_1"] =
+                "!f() { test \"$1\" = get && printf 'username=%s\\npassword=%s\\n' \"$REVIEWER_GIT_USERNAME\" \"$REVIEWER_GIT_PASSWORD\"; }; f";
+            env["REVIEWER_GIT_USERNAME"] = credential.Username;
+            env["REVIEWER_GIT_PASSWORD"] = credential.Password;
+        }
+
+        return env;
+    }
 
     public Task AddWorktreeAsync(string sha, string path, CancellationToken ct) =>
         RunAsync(["worktree", "add", "--quiet", "--detach", "--", path, sha], ct);
@@ -105,11 +137,12 @@ public sealed class GitRepository : IGitRepository
         return result.ExitCode == 0 ? result.StandardOutput : throw Failure(args, result);
     }
 
-    private Task<BufferedCommandResult> RunRawAsync(IReadOnlyList<string> args, string? stdin, CancellationToken ct)
+    private Task<BufferedCommandResult> RunRawAsync(
+        IReadOnlyList<string> args, string? stdin, CancellationToken ct, IReadOnlyDictionary<string, string?>? extraEnvironment = null)
     {
         var command = Cli.Wrap("git")
             .WithArguments(["--git-dir", Path, .. args])
-            .WithEnvironmentVariables(Environment)
+            .WithEnvironmentVariables(extraEnvironment is null ? Environment : new Dictionary<string, string?>(Environment.Concat(extraEnvironment)))
             .WithValidation(CommandResultValidation.None);
         if (stdin is not null)
         {

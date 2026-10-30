@@ -106,14 +106,15 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
             c.Finding.StartLine < c.Finding.EndLine ? "RIGHT" : null)).ToList();
 
         var path = $"{PullPath(pr)}/reviews";
-        var request = new ReviewRequest(result.HeadSha, CommentFormatter.ReviewBody(result.Summary, []), reviewEvent, comments);
+        var request = new ReviewRequest(result.HeadSha, CommentFormatter.ReviewBody(result.Summary, result.SummaryFindings), reviewEvent, comments);
         using var response = await _http.PostAsJsonAsync(path, request, Json, ct).ConfigureAwait(false);
 
         // GitHub rejects the whole review when any comment lands outside the PR diff. Keep the review and its
         // decision, and list the findings in the body instead.
         if (response.StatusCode == HttpStatusCode.UnprocessableEntity && comments.Count > 0)
         {
-            var fallback = request with { Body = CommentFormatter.ReviewBody(result.Summary, result.Comments), Comments = [] };
+            var listed = result.Comments.Select(c => c.Finding).Concat(result.SummaryFindings).ToList();
+            var fallback = request with { Body = CommentFormatter.ReviewBody(result.Summary, listed), Comments = [] };
             using var retry = await _http.PostAsJsonAsync(path, fallback, Json, ct).ConfigureAwait(false);
             await EnsureSuccessAsync(retry, ct).ConfigureAwait(false);
             return;

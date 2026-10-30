@@ -4,7 +4,8 @@ namespace Reviewer.Git;
 public interface IGitRepository
 {
     /// <summary>Fetches <paramref name="refspecs"/> (e.g. <c>refs/pull/7/head:refs/reviewer/pr/7/head</c>) without tags.</summary>
-    Task FetchAsync(string remoteUrl, IReadOnlyList<string> refspecs, CancellationToken ct);
+    /// <param name="credential">For HTTPS remotes that need auth; null uses no credentials at all.</param>
+    Task FetchAsync(string remoteUrl, IReadOnlyList<string> refspecs, GitCredential? credential, CancellationToken ct);
 
     /// <summary>Checks out <paramref name="sha"/> as a detached worktree at <paramref name="path"/>.</summary>
     Task AddWorktreeAsync(string sha, string path, CancellationToken ct);
@@ -36,5 +37,12 @@ public readonly record struct LineSpan(int Start, int End);
 /// without line changes (rename, mode change, binary).
 /// </param>
 public sealed record ChangedFile(string Path, IReadOnlyList<LineSpan> Lines);
+
+/// <summary>HTTPS credentials for one fetch, e.g. <c>x-access-token</c> and a GitHub token.</summary>
+public sealed record GitCredential(string Username, string Password)
+{
+    // Keep the secret out of logs and exception messages.
+    public override string ToString() => $"GitCredential {{ Username = {Username} }}";
+}
 
 public sealed class GitException(string message) : Exception(message);

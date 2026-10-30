@@ -144,7 +144,7 @@ public class GitHubProviderTests
     public async Task PublishReview_PostsOneReviewBoundToReviewedCommit(ReviewDecision decision, string reviewEvent)
     {
         var github = new FakeGitHub().On($"POST {Pull}/reviews", "{}");
-        var result = new ReviewResult("All good.", [Comment("a", 10, 10), Comment("b", 3, 6, "fixed()")], decision, Sha);
+        var result = new ReviewResult("All good.", [Comment("a", 10, 10), Comment("b", 3, 6, "fixed()")], [], decision, Sha);
 
         await github.Provider().PublishReviewAsync(Pr, result, Ct);
 
@@ -171,7 +171,7 @@ public class GitHubProviderTests
         var github = new FakeGitHub()
             .On($"POST {Pull}/reviews", """{ "message": "Unprocessable Entity" }""", HttpStatusCode.UnprocessableEntity)
             .On($"POST {Pull}/reviews", "{}");
-        var result = new ReviewResult("Summary.", [Comment("a", 10, 10)], ReviewDecision.RequestChanges, Sha);
+        var result = new ReviewResult("Summary.", [Comment("a", 10, 10)], [Comment("c", 99, 99).Finding], ReviewDecision.RequestChanges, Sha);
 
         await github.Provider().PublishReviewAsync(Pr, result, Ct);
 
@@ -180,6 +180,21 @@ public class GitHubProviderTests
         Assert.Equal("REQUEST_CHANGES", retry.GetProperty("event").GetString());
         Assert.Empty(retry.GetProperty("comments").EnumerateArray());
         Assert.Contains("`src/Foo.cs:10`: Title a", retry.GetProperty("body").GetString(), StringComparison.Ordinal);
+        Assert.Contains("`src/Foo.cs:99`: Title c", retry.GetProperty("body").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishReview_ListsSummaryFindingsInBody()
+    {
+        var github = new FakeGitHub().On($"POST {Pull}/reviews", "{}");
+        var result = new ReviewResult("Summary.", [Comment("a", 10, 10)], [Comment("c", 99, 99).Finding], ReviewDecision.None, Sha);
+
+        await github.Provider().PublishReviewAsync(Pr, result, Ct);
+
+        var body = github.Requests[0].Body!.Value.GetProperty("body").GetString();
+        Assert.Contains("### Other findings", body, StringComparison.Ordinal);
+        Assert.Contains("`src/Foo.cs:99`: Title c", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Title a", body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -189,7 +204,7 @@ public class GitHubProviderTests
             .On($"POST {Pull}/reviews", """{ "message": "Bad credentials" }""", HttpStatusCode.Unauthorized);
 
         var error = await Assert.ThrowsAsync<GitHubApiException>(() =>
-            github.Provider().PublishReviewAsync(Pr, new ReviewResult("s", [], ReviewDecision.None, Sha), Ct));
+            github.Provider().PublishReviewAsync(Pr, new ReviewResult("s", [], [], ReviewDecision.None, Sha), Ct));
 
         Assert.Equal(HttpStatusCode.Unauthorized, error.Status);
         Assert.Contains("Bad credentials", error.Message, StringComparison.Ordinal);

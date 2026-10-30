@@ -30,15 +30,15 @@ internal static partial class CommentFormatter
         return body.Append('\n').Append(Marker(comment.Fingerprint)).ToString();
     }
 
-    public static string ReviewBody(string summary, IReadOnlyList<InlineComment> unanchored)
+    /// <param name="listed">Findings shown in the body rather than inline.</param>
+    public static string ReviewBody(string summary, IReadOnlyList<Finding> listed)
     {
         var body = new StringBuilder(Defuse(summary));
-        if (unanchored.Count > 0)
+        if (listed.Count > 0)
         {
-            body.Append("\n\n### Findings that could not be placed inline\n");
-            foreach (var c in unanchored)
+            body.Append("\n\n### Other findings\n");
+            foreach (var f in listed)
             {
-                var f = c.Finding;
                 body.Append(CultureInfo.InvariantCulture,
                     $"\n- **{Label(f.Severity)} · {Label(f.Category)}** `{f.File}:{f.StartLine}`: {Defuse(f.Title)}");
             }
