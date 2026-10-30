@@ -9,5 +9,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Reviewer.Core.Tests/Reviewer.Core.Tests.csproj" />
+    <Project Path="tests/Reviewer.Providers.GitHub.Tests/Reviewer.Providers.GitHub.Tests.csproj" />
   </Folder>
 </Solution>

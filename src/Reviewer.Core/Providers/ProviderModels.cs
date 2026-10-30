@@ -47,7 +47,11 @@ public sealed record TriggerFilter(
 /// <summary>A comment this tool posted earlier, linked to the finding that produced it.</summary>
 public sealed record PublishedComment(string ProviderId, string Fingerprint, string? File, int? Line);
 
-public sealed record ReviewResult(string Summary, IReadOnlyList<Finding> InlineFindings, string HeadSha);
+/// <summary>A finding to post inline, with the fingerprint the engine computed for dedup across runs.</summary>
+public sealed record InlineComment(Finding Finding, string Fingerprint);
+
+/// <param name="HeadSha">The commit that was reviewed. The decision applies to this commit only.</param>
+public sealed record ReviewResult(string Summary, IReadOnlyList<InlineComment> Comments, ReviewDecision Decision, string HeadSha);
 
 public enum ReviewDecision
 {
