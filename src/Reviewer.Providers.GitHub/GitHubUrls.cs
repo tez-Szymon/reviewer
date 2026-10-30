@@ -7,6 +7,12 @@ public static class GitHubUrls
 {
     public static readonly Uri GitHubCom = new("https://github.com");
 
+    /// <summary>HTTPS URL git fetches the repository from.</summary>
+    public static string CloneUrl(RepoRef repo) => $"https://{repo.Host.Host}/{repo.Owner}/{repo.Name}.git";
+
+    /// <summary>The ref GitHub keeps at a PR's head commit, fetchable even for PRs from forks.</summary>
+    public static string PullHeadRef(int number) => $"refs/pull/{number.ToString(CultureInfo.InvariantCulture)}/head";
+
     /// <summary>Parses <c>https://github.com/{owner}/{repo}/pull/{number}</c>, ignoring any trailing path, query or fragment.</summary>
     public static bool TryParsePullRequest(Uri url, out PullRequestRef pr)
     {

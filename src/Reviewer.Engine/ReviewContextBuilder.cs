@@ -11,7 +11,8 @@ using Reviewer.Instructions;
 namespace Reviewer.Engine;
 
 /// <summary>Where to fetch a PR from. Provider-specific, e.g. <c>refs/pull/7/head</c> on GitHub.</summary>
-public sealed record ReviewSource(string RemoteUrl, string HeadRef);
+/// <param name="Credential">Used for this fetch only; never written to the job folder or the agent's environment.</param>
+public sealed record ReviewSource(string RemoteUrl, string HeadRef, GitCredential? Credential = null);
 
 /// <summary>Instruction layers for one review; repo agent files are read from the base branch by the builder.</summary>
 public sealed record InstructionSettings(
@@ -35,6 +36,9 @@ public sealed class PreparedReview(IGitRepository git, string jobId, string jobF
 
     /// <summary>The reviewed head and changed lines, for the policy engine.</summary>
     public ReviewScope Scope { get; } = scope;
+
+    /// <summary>A file at the reviewed head, from git; null when the head has no such file.</summary>
+    public Task<string?> ReadHeadFileAsync(string path, CancellationToken ct) => git.ReadFileAsync(Scope.ReviewedHeadSha, path, ct);
 
     public async ValueTask DisposeAsync() =>
         await ReviewContextBuilder.RemoveWorktreeQuietlyAsync(git, Context.WorktreePath).ConfigureAwait(false);
@@ -79,12 +83,14 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         await git.FetchAsync(
             source.RemoteUrl,
             [$"{source.HeadRef}:{prefix}/head", $"refs/heads/{snapshot.BaseBranch}:{prefix}/base"],
+            source.Credential,
             ct).ConfigureAwait(false);
 
         var jobId = JobId(pr);
         var jobFolder = Path.Combine(paths.Jobs, jobId);
         var attempt = CreateAttempt(jobFolder);
-        var worktree = Path.Combine(jobFolder, "worktree");
+        // One worktree per attempt, so two runs that land in the same job folder can't collide.
+        var worktree = Path.Combine(jobFolder, $"worktree-{Path.GetFileName(attempt)}");
         await git.AddWorktreeAsync(snapshot.HeadSha, worktree, ct).ConfigureAwait(false);
 
         try

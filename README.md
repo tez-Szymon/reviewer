@@ -6,7 +6,7 @@ A local-first, per-person AI code reviewer. A .NET engine on your machine polls 
 
 ## Status
 
-M1 scaffolding: the solution, project layout and core contracts are in place; the review loop itself is not implemented yet. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
+M1 in progress: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code in comment mode, using built-in defaults (config files come in M2). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
 
 | Milestone | Scope |
 |---|---|
@@ -24,6 +24,18 @@ dotnet build Reviewer.slnx
 dotnet test Reviewer.slnx
 dotnet run --project src/Reviewer.Cli -- --help
 ```
+
+## Usage
+
+Needs Claude Code logged in (`claude auth login`) and a GitHub token from `GITHUB_TOKEN` or `gh auth login`.
+
+```bash
+reviewer status                                         # agent and GitHub account
+reviewer review https://github.com/acme/api/pull/7 --dry-run   # show the plan only
+reviewer review https://github.com/acme/api/pull/7             # post the review
+```
+
+State lives in `~/.reviewer` (or `REVIEWER_HOME`): job folders with the agent's inputs, output and `plan.json`, and one bare repository per reviewed repo. Markdown skills in `~/.reviewer/skills/*.md` are added to every review.
 
 ## License
 

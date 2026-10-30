@@ -13,7 +13,7 @@ public sealed class GitRepositoryTests : IDisposable
     private async Task<GitRepository> CacheAsync(params string[] refspecs)
     {
         var repo = await GitRepository.OpenOrInitAsync(_source.NewDirectory("cache.git"), Ct);
-        await repo.FetchAsync(_source.Url, refspecs.Length > 0 ? refspecs : [$"main:{HeadRef}"], Ct);
+        await repo.FetchAsync(_source.Url, refspecs.Length > 0 ? refspecs : [$"main:{HeadRef}"], null, Ct);
         return repo;
     }
 
@@ -198,5 +198,50 @@ public sealed class GitRepositoryTests : IDisposable
 
         Assert.Equal("old\n", content);
         Assert.Null(missing);
+    }
+
+    [Fact]
+    public async Task CredentialEnvironment_AnswersGitWithCredential_AndReplacesUserHelpers()
+    {
+        await File.WriteAllTextAsync(_source.GlobalConfig, "[credential]\n\thelper = \"!echo username=leaked; echo password=keychain #\"\n", Ct);
+
+        var filled = Fill(GitRepository.CredentialEnvironment(new GitCredential("x-access-token", "s3cret")));
+        var none = Fill(GitRepository.CredentialEnvironment(null));
+
+        Assert.Contains("username=x-access-token\n", filled, StringComparison.Ordinal);
+        Assert.Contains("password=s3cret\n", filled, StringComparison.Ordinal);
+        Assert.DoesNotContain("keychain", none, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Credential_ToString_HidesPassword()
+    {
+        Assert.DoesNotContain("s3cret", new GitCredential("u", "s3cret").ToString(), StringComparison.Ordinal);
+    }
+
+    // "git credential fill" asks the configured helpers exactly as a fetch would. With no answer it fails (prompts are
+    // off), and the empty string stands for that.
+    private string Fill(IReadOnlyDictionary<string, string?> environment)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("git", ["credential", "fill"])
+        {
+            WorkingDirectory = _source.Path,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        start.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        foreach (var (key, value) in environment)
+        {
+            start.Environment[key] = value;
+        }
+
+        using var process = System.Diagnostics.Process.Start(start)!;
+        process.StandardInput.Write("protocol=https\nhost=github.com\n\n");
+        process.StandardInput.Close();
+        var output = process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return process.ExitCode == 0 ? output.ReplaceLineEndings("\n") : "";
     }
 }

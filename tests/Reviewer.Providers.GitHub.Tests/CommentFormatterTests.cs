@@ -69,6 +69,15 @@ public class CommentFormatterTests
 
 public class GitHubUrlsTests
 {
+    [Fact]
+    public void CloneUrlAndPullHeadRef_PointAtThePullRequest()
+    {
+        var repo = new RepoRef(GitHubUrls.GitHubCom, "acme", "api");
+
+        Assert.Equal("https://github.com/acme/api.git", GitHubUrls.CloneUrl(repo));
+        Assert.Equal("refs/pull/7/head", GitHubUrls.PullHeadRef(7));
+    }
+
     [Theory]
     [InlineData("https://github.com/acme/api/pull/7", "acme", "api", 7)]
     [InlineData("https://github.com/acme/api/pull/7/files?diff=split#x", "acme", "api", 7)]
