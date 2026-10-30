@@ -21,12 +21,14 @@ public sealed class ReviewRunnerTests : IDisposable
     private static Finding Finding(string id, int line, Severity severity = Severity.Major, double confidence = 0.9) =>
         new(id, severity, Category.Correctness, confidence, "src/app.txt", line, line, $"Title {id}", "Body");
 
-    private async Task<(ReviewRunner Runner, FakeProvider Provider, ReviewRequest Request)> SetUpAsync(FindingsReport report, bool dryRun = false)
+    private async Task<(ReviewRunner Runner, FakeProvider Provider, ReviewRequest Request)> SetUpAsync(
+        FindingsReport report, bool dryRun = false, Action? onFeature = null)
     {
         _source.Write("src/app.txt", "one", "two");
         _source.Commit("base");
         _source.Git("switch", "--quiet", "-c", "feature");
         _source.Write("src/app.txt", "one", "  TWO  ", "three");
+        onFeature?.Invoke();
         var head = _source.Commit("change");
         _source.Git("switch", "--quiet", "main");
 
@@ -64,6 +66,29 @@ public sealed class ReviewRunnerTests : IDisposable
         Assert.Contains("with fake", published.Summary, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(outcome.AttemptFolder, ReviewRunner.PlanFile)));
         Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(outcome.AttemptFolder)!, "worktree-1")));
+    }
+
+    [Fact]
+    public async Task Run_FingerprintsSymlinkByItsTarget_NeverReadingThroughIt()
+    {
+        var secret = _source.NewDirectory("secret.txt");
+        await File.WriteAllTextAsync(secret, "TOP SECRET\n", Ct);
+        var finding = Finding("link", 1) with { File = "src/link.txt" };
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("s", [finding]), onFeature: () =>
+        {
+            // A symlink blob (mode 120000) made with plumbing, so the test doesn't need symlink rights on Windows.
+            var target = _source.NewDirectory("target.txt");
+            File.WriteAllText(target, secret);
+            var blob = _source.Git("hash-object", "-w", target).Trim();
+            _source.Git("update-index", "--add", "--cacheinfo", $"120000,{blob},src/link.txt");
+            _source.Git("checkout", "--", "src/link.txt");
+        });
+
+        await runner.RunAsync(request, Ct);
+
+        var comment = Assert.Single(Assert.Single(provider.Published).Comments);
+        Assert.Equal(FindingFingerprint.Compute(finding, secret), comment.Fingerprint);
+        Assert.NotEqual(FindingFingerprint.Compute(finding, "TOP SECRET"), comment.Fingerprint);
     }
 
     [Fact]

@@ -54,11 +54,10 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             return new ReviewOutcome(prepared.JobId, attempt, snapshot, report, plan, Published: false);
         }
 
-        // Fingerprints hash the code a finding points at, so they're taken while the worktree still exists.
         var comments = new List<InlineComment>(plan.InlineFindings.Count);
         foreach (var finding in plan.InlineFindings)
         {
-            var snippet = await SnippetAsync(prepared.Context.WorktreePath, finding, ct).ConfigureAwait(false);
+            var snippet = await SnippetAsync(prepared, finding, ct).ConfigureAwait(false);
             comments.Add(new InlineComment(finding, FindingFingerprint.Compute(finding, snippet)));
         }
 
@@ -73,17 +72,16 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
         return new ReviewOutcome(prepared.JobId, attempt, snapshot, report, plan, Published: true);
     }
 
-    private static async Task<string> SnippetAsync(string worktree, Finding finding, CancellationToken ct)
+    private static async Task<string> SnippetAsync(PreparedReview prepared, Finding finding, CancellationToken ct)
     {
-        // The path comes from the model: read only inside the worktree.
-        var root = Path.GetFullPath(worktree) + Path.DirectorySeparatorChar;
-        var path = Path.GetFullPath(Path.Combine(root, finding.File));
-        if (!path.StartsWith(root, StringComparison.Ordinal) || !File.Exists(path))
+        // The path comes from the model and the files from the PR, so read from git rather than the worktree: git
+        // returns a symlink's target as text instead of following it, and paths outside the tree simply don't exist.
+        if (await prepared.ReadHeadFileAsync(finding.File, ct).ConfigureAwait(false) is not { } content)
         {
             return "";
         }
 
-        var lines = await File.ReadAllLinesAsync(path, ct).ConfigureAwait(false);
+        var lines = content.ReplaceLineEndings("\n").Split('\n');
         var start = Math.Clamp(finding.StartLine, 1, lines.Length + 1) - 1;
         var end = Math.Clamp(finding.EndLine, start, lines.Length);
         return string.Join('\n', lines[start..end]);

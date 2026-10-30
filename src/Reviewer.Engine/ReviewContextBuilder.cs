@@ -37,6 +37,9 @@ public sealed class PreparedReview(IGitRepository git, string jobId, string jobF
     /// <summary>The reviewed head and changed lines, for the policy engine.</summary>
     public ReviewScope Scope { get; } = scope;
 
+    /// <summary>A file at the reviewed head, from git; null when the head has no such file.</summary>
+    public Task<string?> ReadHeadFileAsync(string path, CancellationToken ct) => git.ReadFileAsync(Scope.ReviewedHeadSha, path, ct);
+
     public async ValueTask DisposeAsync() =>
         await ReviewContextBuilder.RemoveWorktreeQuietlyAsync(git, Context.WorktreePath).ConfigureAwait(false);
 }
