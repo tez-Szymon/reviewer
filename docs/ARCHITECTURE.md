@@ -142,6 +142,18 @@ Exact CLI flags are confirmed per CLI version in the adapter, and `CheckAsync` r
 
 Processes are run with CliWrap. Each agent has a concurrency limit, default 1 for subscriptions.
 
+### Job queue
+
+The queue is the `Jobs` table, so it survives restarts and the CLI can add to it while the engine runs. `reviewer queue add` (and later the scheduler) inserts a `Queued` job; a second request for a PR that already has a queued job for the same agent and dry-run setting is merged into it, taking the new request's `NotBefore` (a later push extends the debounce, a manual request ends it). The job reads the PR and the config when it starts, not when it's queued.
+
+`QueueWorker` (run by `reviewer serve`) polls the table every 5 s, or at once when woken, and starts a waiting job when:
+
+- it's due: past `NotBefore`, or, for a `Throttled` job, past `RetryAt` (15 min after the throttle when the agent gave no time);
+- its agent has a free slot under `maxConcurrency`, counting jobs running in any process;
+- no other job for the same PR is running, in any process. `reviewer review` refuses to start on a PR that's being reviewed, too.
+
+A usage limit is the subscription's, so a throttled job pauses its whole agent until its retry time. A job is claimed with a conditional update (`Queued`/`Throttled` → `Running`), so two processes can't both run it, and records the process id running it. Cancelling a waiting job is immediate; cancelling a running one sets `CancelRequested`, which the worker running it acts on. Stopping the engine cancels its running jobs and queues them again. A job left `Running` by a process that died is marked `Failed` when the engine starts (or `reviewer queue` lists), not re-run, since it may have published already; `reviewer queue retry` queues it again. Only one engine runs at a time: `reviewer serve` holds `engine.lock` in the data folder.
+
 ### API agents (phase 2)
 
 Built on `Microsoft.Extensions.AI` `IChatClient`, so OpenAI, Anthropic and others share one code path. The engine owns the tool loop and offers read-only tools only: `read_file`, `list_dir`, `grep`, `git_show`. Structured output enforces the same schema.
@@ -349,7 +361,8 @@ Stack: Avalonia 11 + CommunityToolkit.Mvvm, a FluentAvalonia-style theme, tray i
 ```text
 reviewer status                     # engine + agents health
 reviewer review <pr-url> [--dry-run] [--full] [--agent codex]
-reviewer queue | history | show <job-id>
+reviewer queue [add <pr-url> | cancel <job-id> | retry <job-id>]
+reviewer history | show <job-id>
 reviewer repos add <url> | list
 reviewer config validate | show [repo]
 reviewer serve                      # run the engine headless
@@ -359,7 +372,7 @@ reviewer serve                      # run the engine headless
 
 **Storage.** SQLite at `~/.reviewer/reviewer.db` via EF Core, in WAL mode so the CLI can read while the engine writes. The engine applies pending migrations when it opens the database; migrations live in `Reviewer.Engine/State/Migrations` and are added with the repo's local `dotnet ef` tool. Tables:
 
-- `Jobs`: one row per job folder. State machine Queued, Running, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, summary, error and retry time. Failed and throttled runs are recorded too.
+- `Jobs`: one row per job folder, and the job queue. State machine Queued, Running, Skipped, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, summary, error, retry time, not-before time, full and dry-run flags, a cancel request and the process running it. Failed and throttled runs are recorded too.
 - `Findings`: every finding the agent reported, in report order, with what the policy did with it (`inline`, `summary`, `already-posted`, `dropped`), whether it blocked, its fingerprint, and the job that resolved it.
 - `PullRequests`: each PR's last *published* review (head, base, job, commit patch-ids, per-file hashes). Dry runs don't move it, since nothing reached the PR.
 

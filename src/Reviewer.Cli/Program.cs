@@ -13,21 +13,7 @@ using Reviewer.Engine.State;
 using Reviewer.Git;
 using Reviewer.Providers.GitHub;
 
-var prUrl = new Argument<Uri>("pr-url")
-{
-    Description = "URL of the pull request to review",
-    CustomParser = result =>
-    {
-        var value = result.Tokens.Single().Value;
-        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http")
-        {
-            return uri;
-        }
-
-        result.AddError($"'{value}' is not a pull request URL.");
-        return null;
-    },
-};
+var prUrl = PrUrlArgument();
 var dryRun = new Option<bool>("--dry-run") { Description = "Show the review plan without publishing it" };
 var full = new Option<bool>("--full") { Description = "Review the whole PR, not only what's new since the last review" };
 var agent = new Option<string?>("--agent") { Description = "Agent to use instead of the configured one" };
@@ -80,42 +66,25 @@ review.SetAction(async (parse, ct) =>
 
     // The overrides go into the hash too: they change what a review keeps, so a head reviewed without them isn't done.
     effective = effective.WithOverrides(parse.GetValue(model), parse.GetValue(minConfidence));
-    if (effective.AgentId != AgentsConfig.ClaudeCodeId)
-    {
-        return Fail($"Agent '{effective.AgentId}' is not available yet; use claude-code.");
-    }
-
-    if (await GitHubToken.ResolveAsync(runner, effective.Account, ct) is not { } token)
-    {
-        return Fail(GitHubToken.Missing(effective.Account));
-    }
 
     try
     {
-        using var http = GitHubProvider.CreateHttpClient(token);
-        var git = await GitRepository.OpenOrInitAsync(paths.Repository(pr.Repo), ct);
-        var reviewer = new ReviewRunner(
-            new GitHubProvider(http),
-            new ReviewContextBuilder(git, paths, TimeProvider.System),
-            new ClaudeCodeAgent(new ClaudeCodeOptions(Model: effective.Agent.Model), runner),
-            await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct));
-        var policy = effective.Policy.ToReviewPolicy();
-        var request = new ReviewRequest(
-            pr,
-            new ReviewSource(GitHubUrls.CloneUrl(pr.Repo), GitHubUrls.PullHeadRef(pr.Number), new GitCredential("x-access-token", token)),
-            policy with
-            {
-                // The flag can turn a dry run on, never off: a repo set to dry run stays unpublished.
-                DryRun = policy.DryRun || parse.GetValue(dryRun),
-            },
-            await effective.Policy.Instructions.LoadAsync(paths, home, ct),
-            effective.Agent.Timeout,
-            effective.Hash,
-            parse.GetValue(full));
+        var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+        await store.FailOrphanedJobsAsync(QueueWorker.IsRunning, ct);
+        if ((await store.ListQueueAsync(ct)).FirstOrDefault(j => j.State == JobState.Running && SamePr(j, pr)) is { } running)
+        {
+            return Fail($"{pr.Repo}#{pr.Number} is being reviewed by job {running.Id}; wait for it or 'reviewer queue cancel {running.Id}'.");
+        }
 
+        using var run = await new ReviewFactory(paths, runner, store, home)
+            .CreateAsync(pr, effective, parse.GetValue(dryRun), parse.GetValue(full), ct);
         Console.Error.WriteLine($"Reviewing {pr.Repo}#{pr.Number}; this can take several minutes...");
-        ReviewPrinter.Print(await reviewer.RunAsync(request, ct), Console.Out);
+        ReviewPrinter.Print(await run.Runner.RunAsync(run.Request, ct), Console.Out);
         return 0;
+    }
+    catch (ReviewSetupException e)
+    {
+        return Fail(e.Message);
     }
     catch (AgentThrottledException e)
     {
@@ -264,8 +233,238 @@ show.SetAction(async (parse, ct) =>
 
 var configCommand = new Command("config", $"Inspect {ConfigLoader.FileName} in the data folder") { validate, show };
 
-var root = new RootCommand("Local-first AI code reviewer") { review, history, showJob, status, configCommand };
-return await root.Parse(args).InvokeAsync();
+var addUrl = PrUrlArgument();
+var addDryRun = new Option<bool>("--dry-run") { Description = "Show the review plan without publishing it" };
+var addFull = new Option<bool>("--full") { Description = "Review the whole PR, not only what's new since the last review" };
+var addAgent = new Option<string?>("--agent") { Description = "Agent to use instead of the configured one" };
+var queueAdd = new Command("add", "Queue a review for the engine ('reviewer serve') to run") { addUrl, addDryRun, addFull, addAgent };
+queueAdd.SetAction(async (parse, ct) =>
+{
+    if (!GitHubUrls.TryParsePullRequest(parse.GetValue(addUrl)!, out var pr))
+    {
+        return Fail("Only github.com pull request URLs are supported: https://github.com/<owner>/<repo>/pull/<number>.");
+    }
+
+    if (await LoadConfigAsync(paths, ct) is not { } config)
+    {
+        return 1;
+    }
+
+    EffectiveConfig effective;
+    try
+    {
+        effective = config.For(pr.Repo, parse.GetValue(addAgent));
+    }
+    catch (ConfigException e)
+    {
+        return Fail(e.Message);
+    }
+
+    if (effective.AgentId != AgentsConfig.ClaudeCodeId)
+    {
+        return Fail($"Agent '{effective.AgentId}' is not available yet; use claude-code.");
+    }
+
+    try
+    {
+        var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+        var (id, added) = await store.EnqueueAsync(
+            new JobRecord
+            {
+                Id = ReviewContextBuilder.JobId(pr, TimeProvider.System.GetUtcNow()),
+                Host = ReviewStore.Host(pr.Repo),
+                Repo = pr.Repo.ToString(),
+                Number = pr.Number,
+                ConfigHash = effective.Hash,
+                AgentId = effective.AgentId,
+                AppVersion = ReviewStore.AppVersion,
+                DryRun = parse.GetValue(addDryRun),
+                Full = parse.GetValue(addFull),
+            },
+            ct);
+        Console.WriteLine(added ? $"Queued {id}." : $"{pr.Repo}#{pr.Number} is already queued as {id}.");
+        if (!EngineRunning(paths))
+        {
+            Console.Error.WriteLine("No engine is running; start one with 'reviewer serve'.");
+        }
+
+        return 0;
+    }
+    catch (Exception e) when (e is DbException or DbUpdateException)
+    {
+        return Fail(DatabaseError(paths, e));
+    }
+});
+
+var cancelId = new Argument<string>("job-id") { Description = "A job id from 'reviewer queue', or its unique start" };
+var queueCancel = new Command("cancel", "Cancel a queued job, or ask the engine to stop a running one") { cancelId };
+queueCancel.SetAction((parse, ct) => WithJobAsync(paths, parse.GetValue(cancelId)!, async (store, job) =>
+{
+    if (job.State is not (JobState.Queued or JobState.Running or JobState.Throttled))
+    {
+        return Fail($"{job.Id} is {job.State.ToString().ToLowerInvariant()}; there's nothing to cancel.");
+    }
+
+    switch (await store.CancelJobAsync(job.Id, ct))
+    {
+        case JobState.Cancelled:
+            Console.WriteLine($"Cancelled {job.Id}.");
+            return 0;
+        case JobState.Running:
+            // Only the engine watches for this; a 'reviewer review' run stops with Ctrl+C in its own terminal.
+            Console.WriteLine($"Asked the engine to stop {job.Id}.");
+            return 0;
+        case var state:
+            return Fail($"{job.Id} is {state?.ToString().ToLowerInvariant() ?? "gone"}; there's nothing to cancel.");
+    }
+}, ct));
+
+var retryId = new Argument<string>("job-id") { Description = "A job id from 'reviewer history', or its unique start" };
+var queueRetry = new Command("retry", "Queue a failed, cancelled or throttled job again, to run now") { retryId };
+queueRetry.SetAction((parse, ct) => WithJobAsync(paths, parse.GetValue(retryId)!, async (store, job) =>
+{
+    if (!await store.RetryJobAsync(job.Id, ct))
+    {
+        return Fail($"{job.Id} is {job.State.ToString().ToLowerInvariant()}; only failed, cancelled or throttled jobs can be retried.");
+    }
+
+    Console.WriteLine($"Queued {job.Id} again.");
+    if (!EngineRunning(paths))
+    {
+        Console.Error.WriteLine("No engine is running; start one with 'reviewer serve'.");
+    }
+
+    return 0;
+}, ct));
+
+var queue = new Command("queue", "List queued, running and throttled reviews") { queueAdd, queueCancel, queueRetry };
+queue.SetAction(async (_, ct) =>
+{
+    try
+    {
+        var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+        await store.FailOrphanedJobsAsync(QueueWorker.IsRunning, ct);
+        var jobs = await store.ListQueueAsync(ct);
+        HistoryPrinter.PrintQueue(jobs, TimeProvider.System.GetUtcNow(), Console.Out);
+        if (jobs.Any(j => j.State != JobState.Running) && !EngineRunning(paths))
+        {
+            Console.Error.WriteLine("No engine is running; start one with 'reviewer serve'.");
+        }
+
+        return 0;
+    }
+    catch (Exception e) when (e is DbException or DbUpdateException)
+    {
+        return Fail(DatabaseError(paths, e));
+    }
+});
+
+var serve = new Command("serve", "Run the engine: review queued jobs until stopped with Ctrl+C");
+serve.SetAction(async (_, ct) =>
+{
+    if (await LoadConfigAsync(paths, ct) is not { } config)
+    {
+        return 1;
+    }
+
+    FileStream engineLock;
+    try
+    {
+        Directory.CreateDirectory(paths.Root);
+        engineLock = new FileStream(paths.EngineLock, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    }
+    catch (IOException)
+    {
+        return Fail($"Another engine is already running ({paths.EngineLock} is locked).");
+    }
+
+    await using (engineLock)
+    {
+        try
+        {
+            var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+            using var worker = new QueueWorker(
+                store, new QueueLauncher(paths, new ReviewFactory(paths, runner, store, home), config, Log), TimeProvider.System, Log);
+            Log($"Engine started on {paths.Root}; Ctrl+C stops it.");
+            await worker.RunAsync(ct);
+            Log("Engine stopped.");
+            return 0;
+        }
+        catch (Exception e) when (e is DbException or DbUpdateException)
+        {
+            return Fail(DatabaseError(paths, e));
+        }
+    }
+
+    static void Log(string message) => Console.WriteLine($"{DateTime.Now:HH:mm:ss} {message}");
+});
+
+var root = new RootCommand("Local-first AI code reviewer") { review, queue, serve, history, showJob, status, configCommand };
+
+// Stopping the engine cancels running reviews and queues them again; give that time before the process is ended.
+return await root.Parse(args).InvokeAsync(new InvocationConfiguration { ProcessTerminationTimeout = TimeSpan.FromSeconds(30) });
+
+static Argument<Uri> PrUrlArgument() => new("pr-url")
+{
+    Description = "URL of the pull request to review",
+    CustomParser = result =>
+    {
+        var value = result.Tokens.Single().Value;
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http")
+        {
+            return uri;
+        }
+
+        result.AddError($"'{value}' is not a pull request URL.");
+        return null;
+    },
+};
+
+// Resolves a job id or its unique start, then acts on the job.
+static async Task<int> WithJobAsync(ReviewerPaths paths, string idOrPrefix, Func<ReviewStore, JobRecord, Task<int>> action, CancellationToken ct)
+{
+    try
+    {
+        var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
+        if (await store.GetJobAsync(idOrPrefix, ct) is not { } details)
+        {
+            return Fail($"No job '{idOrPrefix}'. See 'reviewer queue' and 'reviewer history'.");
+        }
+
+        return await action(store, details.Job);
+    }
+    catch (InvalidOperationException e)
+    {
+        return Fail(e.Message);
+    }
+    catch (Exception e) when (e is DbException or DbUpdateException)
+    {
+        return Fail(DatabaseError(paths, e));
+    }
+}
+
+// The engine holds its lock file exclusively while it runs.
+static bool EngineRunning(ReviewerPaths paths)
+{
+    try
+    {
+        using var _ = new FileStream(paths.EngineLock, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return false;
+    }
+    catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+    {
+        return false;
+    }
+    catch (IOException)
+    {
+        return true;
+    }
+}
+
+static bool SamePr(JobRecord job, PullRequestRef pr) =>
+    string.Equals(job.Host, ReviewStore.Host(pr.Repo), StringComparison.OrdinalIgnoreCase)
+    && string.Equals(job.Repo, pr.Repo.ToString(), StringComparison.OrdinalIgnoreCase)
+    && job.Number == pr.Number;
 
 static async Task<ReviewerConfig?> LoadConfigAsync(ReviewerPaths paths, CancellationToken ct)
 {

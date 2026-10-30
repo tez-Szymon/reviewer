@@ -11,6 +11,7 @@ namespace Reviewer.Engine.State;
 
 public enum JobState
 {
+    /// <summary>Waiting for the queue worker; it starts no earlier than <see cref="JobRecord.NotBefore"/>.</summary>
     Queued,
     Running,
 
@@ -78,6 +79,21 @@ public sealed class JobRecord
     public DateTimeOffset? FinishedAt { get; set; }
 
     public DateTimeOffset? RetryAt { get; set; }
+
+    /// <summary>A queued job doesn't start before this, so a burst of pushes produces one review. Null starts it when it's due.</summary>
+    public DateTimeOffset? NotBefore { get; set; }
+
+    /// <summary>Review the whole PR, not only what's new since the last review.</summary>
+    public bool Full { get; set; }
+
+    /// <summary>Someone asked to cancel the job while it ran; the worker running it stops it.</summary>
+    public bool CancelRequested { get; set; }
+
+    /// <summary>
+    /// The process running the job, so a job left <see cref="JobState.Running"/> by a process that died can be told
+    /// from one that is still running.
+    /// </summary>
+    public int? RunnerPid { get; set; }
 
     /// <summary>The latest attempt's folder, with the agent's inputs, output and <c>plan.json</c>.</summary>
     public string? AttemptFolder { get; set; }
@@ -210,6 +226,7 @@ public sealed class ReviewerDb(DbContextOptions<ReviewerDb> options) : DbContext
             job.Property(j => j.Repo).UseCollation("NOCASE");
             job.HasIndex(j => new { j.Host, j.Repo, j.Number });
             job.HasIndex(j => j.CreatedAt);
+            job.HasIndex(j => j.State);
             job.HasMany(j => j.Findings).WithOne().HasForeignKey(f => f.JobId).OnDelete(DeleteBehavior.Cascade);
         });
 
