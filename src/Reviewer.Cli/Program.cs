@@ -66,17 +66,17 @@ review.SetAction(async (parse, ct) =>
     EffectiveConfig effective;
     try
     {
-        effective = config.For(pr.Repo);
+        // With --agent, that agent's own model and timeout apply, and the config hash says so.
+        effective = config.For(pr.Repo, parse.GetValue(agent));
     }
     catch (ConfigException e)
     {
         return Fail(e.Message);
     }
 
-    var agentId = parse.GetValue(agent) ?? effective.AgentId;
-    if (agentId != AgentsConfig.ClaudeCodeId)
+    if (effective.AgentId != AgentsConfig.ClaudeCodeId)
     {
-        return Fail($"Agent '{agentId}' is not available yet; use claude-code.");
+        return Fail($"Agent '{effective.AgentId}' is not available yet; use claude-code.");
     }
 
     if (await GitHubToken.ResolveAsync(runner, effective.Account, ct) is not { } token)

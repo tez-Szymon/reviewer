@@ -84,6 +84,27 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void For_AgentOverride_UsesThatAgentsSettings_AndChangesTheHash()
+    {
+        var config = ConfigLoader.Parse("""
+            agents:
+              default: codex
+              codex: { timeoutMinutes: 30, model: gpt-5 }
+              claude-code: { timeoutMinutes: 10, model: opus }
+            """);
+
+        var configured = config.For(Api);
+        var overridden = config.For(Api, AgentsConfig.ClaudeCodeId);
+
+        Assert.Equal(AgentsConfig.CodexId, configured.AgentId);
+        Assert.Equal(AgentsConfig.ClaudeCodeId, overridden.AgentId);
+        Assert.Equal("opus", overridden.Agent.Model);
+        Assert.Equal(TimeSpan.FromMinutes(10), overridden.Agent.Timeout);
+        Assert.NotEqual(configured.Hash, overridden.Hash);
+        Assert.Contains("Unknown agent 'gpt'", Assert.Throws<ConfigException>(() => config.For(Api, "gpt")).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void For_MatchesRepoCaseInsensitively()
     {
         var config = ConfigLoader.Parse("repos: [{ repo: Acme/API, overrides: { review: { mode: gate } } }]");
@@ -183,6 +204,8 @@ public class ConfigLoaderTests
     [Theory]
     [InlineData("accounts: [{ id: gl, provider: gitlab, host: https://gitlab.com }]", "GitLab support arrives in M3")]
     [InlineData("accounts: [{ id: ghe, host: https://git.acme.com }]", "only https://github.com is supported")]
+    [InlineData("accounts: [{ id: gh, host: http://github.com }]", "only https://github.com is supported")]
+    [InlineData("accounts: [{ id: gh, host: https://github.com:8443 }]", "only https://github.com is supported")]
     [InlineData("accounts: [{ id: a }, { id: a }]", "accounts[1].id: 'a' is already used")]
     [InlineData("agents: { default: gpt }", "agents.default: must be one of: claude-code, codex.")]
     [InlineData("defaults: { review: { mode: gate-merge } }", "gate-merge arrives in M3")]
@@ -190,6 +213,7 @@ public class ConfigLoaderTests
     [InlineData("repos: [{ repo: api }]", "repos[0].repo: must be owner/name.")]
     [InlineData("repos: [{ repo: acme/api, account: work }]", "repos[0].account: no account with id 'work'.")]
     [InlineData("repos: [{ repo: acme/api }, { repo: ACME/api }]", "repos[1].repo: ACME/api is listed twice.")]
+    [InlineData("accounts: [{ id: gh }]\nrepos: [{ repo: acme/api }, { repo: acme/api, account: gh }]", "repos[1].repo: acme/api is listed twice.")]
     [InlineData("accounts: [{ id: a }, { id: b }]\nrepos: [{ repo: acme/api }]", "repos[0]: set account")]
     [InlineData("defaults: { review: { mode: gate } }\ndefaults: {}", "config.yaml:2: Duplicate key defaults")]
     [InlineData("defaults: { review: [", "config.yaml:2: While parsing a node")]
