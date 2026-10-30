@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Reviewer.Core.Findings;
 using Reviewer.Core.Providers;
@@ -26,7 +27,8 @@ public static class PolicyEngine
             .ToList();
         if (kept.Count < report.Findings.Count)
         {
-            reasons.Add($"Dropped {report.Findings.Count - kept.Count} finding(s) below confidence {policy.MinConfidence} or in ignored paths.");
+            reasons.Add(string.Create(CultureInfo.InvariantCulture,
+                $"Dropped {report.Findings.Count - kept.Count} finding(s) below confidence {policy.MinConfidence} or in ignored paths."));
         }
 
         // Findings outside the delta can't block or be anchored inline; they go to the summary.

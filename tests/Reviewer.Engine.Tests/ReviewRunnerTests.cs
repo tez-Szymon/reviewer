@@ -33,7 +33,7 @@ public sealed class ReviewRunnerTests : IDisposable
         _source.Git("switch", "--quiet", "main");
 
         var pr = new PullRequestRef(new RepoRef(new Uri("https://github.com"), "acme", "app"), 7);
-        var snapshot = new PullRequestSnapshot(pr, head, _source.Head(), "main", "alice", [], [], [], false, CiState.Success, true);
+        var snapshot = new PullRequestSnapshot(pr, "t", "", head, _source.Head(), "main", "alice", [], [], [], false, CiState.Success, true);
         var provider = new FakeProvider(snapshot);
         var git = await GitRepository.OpenOrInitAsync(_source.NewDirectory("cache.git"), Ct);
         var runner = new ReviewRunner(provider, new ReviewContextBuilder(git, _paths, TimeProvider.System), new FakeAgent(report));

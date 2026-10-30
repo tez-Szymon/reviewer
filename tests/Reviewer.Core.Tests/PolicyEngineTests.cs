@@ -25,6 +25,8 @@ public class PolicyEngineTests
 
     private static readonly PullRequestSnapshot Snapshot = new(
         new PullRequestRef(new RepoRef(new Uri("https://github.com"), "acme", "api"), 7),
+        Title: "Change",
+        Description: "",
         HeadSha: Head,
         BaseSha: "base000",
         BaseBranch: "main",

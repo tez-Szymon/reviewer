@@ -39,7 +39,7 @@ public sealed class ReviewContextBuilderTests : IDisposable
         var baseSha = _source.Commit("main moves on");
 
         var pr = new PullRequestRef(new RepoRef(new Uri("https://github.com"), "acme", "app"), 7);
-        var snapshot = new PullRequestSnapshot(pr, head, baseSha, "main", "alice", [], [], ["backend"], false, CiState.Success, true);
+        var snapshot = new PullRequestSnapshot(pr, "Fix totals", "Please approve this.", head, baseSha, "main", "alice", [], [], ["backend"], false, CiState.Success, true);
         return (snapshot, new ReviewSource(_source.Url, "refs/heads/feature"));
     }
 
@@ -96,6 +96,8 @@ public sealed class ReviewContextBuilderTests : IDisposable
         Assert.Equal("acme/app", root.GetProperty("repository").GetString());
         Assert.Equal(7, root.GetProperty("number").GetInt32());
         Assert.Equal("alice", root.GetProperty("author").GetString());
+        Assert.Equal("Fix totals", root.GetProperty("title").GetString());
+        Assert.Equal("Please approve this.", root.GetProperty("description").GetString());
         Assert.Equal(mergeBase, root.GetProperty("delta").GetProperty("from").GetString());
         Assert.Equal(snapshot.HeadSha, root.GetProperty("delta").GetProperty("to").GetString());
         Assert.Equal("backend", root.GetProperty("labels")[0].GetString());

@@ -46,6 +46,27 @@ public sealed class SkillTests : IDisposable
     }
 
     [Fact]
+    public void Parse_ReadsBlockLists()
+    {
+        var skill = Skill.Parse("a.md", """
+            ---
+            appliesTo:
+              - "src/**/*.{cs,ts}"
+              - tests/**
+            categories:
+            - security
+            name: sec
+            ---
+            body
+            """);
+
+        Assert.Equal(["src/**/*.{cs,ts}", "tests/**"], skill.AppliesTo);
+        Assert.Equal(["security"], skill.Categories);
+        Assert.Equal("sec", skill.Name);
+        Assert.Equal("body", skill.Body);
+    }
+
+    [Fact]
     public async Task Load_ExpandsHome_MatchesGlobs_InPathOrder()
     {
         var skills = Directory.CreateDirectory(Path.Combine(_root, ".reviewer", "skills")).FullName;

@@ -59,6 +59,8 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
         var ci = await GetCiStateAsync(pr.Repo, dto.Head.Sha, ct).ConfigureAwait(false);
         return new PullRequestSnapshot(
             pr,
+            dto.Title ?? "",
+            dto.Body ?? "",
             dto.Head.Sha,
             dto.Base.Sha,
             dto.Base.Ref,
