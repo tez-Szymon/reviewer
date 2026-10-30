@@ -1,6 +1,7 @@
 using Reviewer.Core.Agents;
 using Reviewer.Core.Findings;
 using Reviewer.Core.Providers;
+using Reviewer.Engine.Config;
 using Reviewer.Git;
 using Reviewer.Git.Tests;
 using Reviewer.Instructions;
@@ -40,7 +41,7 @@ public sealed class ReviewRunnerTests : IDisposable
         var request = new ReviewRequest(
             pr,
             new ReviewSource(_source.Url, "refs/heads/feature"),
-            ReviewDefaults.Policy with { DryRun = dryRun },
+            ReviewerConfig.Default.Defaults.ToReviewPolicy() with { DryRun = dryRun },
             new InstructionSettings(true, [], [], RepoAgentFileMode.Ignore),
             TimeSpan.FromMinutes(1));
         return (runner, provider, request);

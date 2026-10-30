@@ -248,14 +248,16 @@ The agent always gets the whole PR checkout, so it can read surrounding code. On
 
 ## Configuration
 
-One global policy, overridable per repo. Overrides are deep-merged: a repo sets only the keys it changes. Config lives in `~/.reviewer/config.yaml`, edited through the app or by hand, and validated against a JSON schema on load.
+One global policy, overridable per repo. Config lives in `~/.reviewer/config.yaml`, edited through the app or by hand. Every key is optional: the file is merged onto built-in defaults (embedded in the engine), and each repo's `overrides` are merged onto the result's `defaults`. Maps merge key by key; lists and values replace, so a repo that sets `ignorePaths` gets exactly that list.
+
+Loading is strict. Unknown or misspelt keys (keys are case-sensitive), wrong types, unknown enum values, out-of-range numbers and dangling references are errors, reported as `config.yaml:<line>: <key path>: <problem>`. The typed model and its checks are the schema; there is no separate JSON Schema file. Keys are camelCase and enum values kebab-case. `reviewer config validate` checks the file and `reviewer config show [owner/name]` prints the merged result.
 
 ```yaml
 accounts:
   - id: gh-main
-    provider: github
+    provider: github           # gitlab arrives in M3
     host: https://github.com
-    token: keychain:reviewer/gh-main   # secret reference, never the token itself
+    token: env:GITHUB_TOKEN    # a reference, never the token itself; keychain:… in M3
   - id: gl-work
     provider: gitlab
     host: https://gitlab.company.com
@@ -263,16 +265,19 @@ accounts:
 
 agents:
   default: claude-code
-  claude-code: { maxConcurrency: 1, timeoutMinutes: 15 }
+  claude-code: { maxConcurrency: 1, timeoutMinutes: 15, model: opus }
   codex:       { maxConcurrency: 1, timeoutMinutes: 15 }
 
 defaults:                      # global policy
   triggers:
-    initial: [assignedToMe, reviewRequested]
-    reReview: { onNewCommits: true, debounceMinutes: 5, onReassignment: true }
+    initial: [assigned-to-me, review-requested]   # also all, has-label (labels), authored-by (authors)
+    labels: []
+    authors: []
+    reReview: { onNewCommits: true, debounceMinutes: 5, onReassignment: true, onReviewRequested: true }
     skipDrafts: true
+    targetBranches: []         # empty means any
+    paths: []                  # only PRs touching these globs; empty means any
     maxDiffLines: 3000
-    ignorePaths: ["**/*.lock", "**/dist/**", "**/*.min.js"]
   review:
     mode: comment              # comment | approve | gate | gate-merge
     dryRun: false
@@ -281,24 +286,31 @@ defaults:                      # global policy
       - { minSeverity: major, categories: [security, correctness] }
       - { minSeverity: blocker }
     maxInlineComments: 20
+    ignorePaths: ["**/*.lock", "**/dist/**", "**/*.min.js"]
+    requestChangesFallback: unresolved-threads    # or comment
   merge:
     method: squash
     requireGreenCi: true
   instructions:
     useDefaultGuide: true
-    skills: ["~/.reviewer/skills/*.md"]
-    repoAgentFiles: context     # ignore | context | instructions
+    skills: ["skills/*.md"]    # layer 3; relative to ~/.reviewer, ~ is the home directory
+    repoSkills: []             # layer 4, resolved the same way
+    repoAgentFiles: context    # ignore | context | instructions
 
 repos:
-  - account: gh-main
+  - account: gh-main           # optional when only one account is configured
     repo: acme/payments-api
     overrides:
       review: { mode: gate }
-      instructions: { skills: ["~/.reviewer/skills/payments/*.md"] }
+      instructions: { repoSkills: ["skills/payments/*.md"] }
   - account: gl-work
     repo: platform/billing
     agent: codex
 ```
+
+Without accounts in the file there is one implicit github.com account whose token comes from `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`, as in M1. A PR in a repo without an entry is reviewed with `defaults` and the account for its host.
+
+Each review's effective config gets a hash of the settings that shape its result: agent, agent settings, `review`, `merge` and `instructions`. Triggers are left out, since they decide whether a review happens, not what it says. The hash is part of the job key `(repo, PR, head SHA, config hash)`.
 
 Repo selection in the app: browse repos visible to an account (by user, org or group) and tick them, or paste a URL. Both produce an entry under `repos`.
 
@@ -330,7 +342,7 @@ reviewer status                     # engine + agents health
 reviewer review <pr-url> [--dry-run] [--agent codex]
 reviewer queue | history | show <job-id>
 reviewer repos add <url> | list
-reviewer config validate | edit
+reviewer config validate | show [repo]
 reviewer serve                      # run the engine headless
 ```
 

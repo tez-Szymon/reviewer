@@ -1,6 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Config\defaults.yaml" LogicalName="Reviewer.Engine.defaults.yaml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
     <ProjectReference Include="..\Reviewer.Git\Reviewer.Git.csproj" />
     <ProjectReference Include="..\Reviewer.Instructions\Reviewer.Instructions.csproj" />
