@@ -25,6 +25,29 @@ internal static class HistoryPrinter
         }
     }
 
+    /// <summary>The queue for <c>reviewer queue</c>, oldest first.</summary>
+    public static void PrintQueue(IReadOnlyList<JobRecord> jobs, DateTimeOffset now, TextWriter output)
+    {
+        if (jobs.Count == 0)
+        {
+            output.WriteLine("The queue is empty.");
+            return;
+        }
+
+        foreach (var job in jobs)
+        {
+            var state = job.State switch
+            {
+                JobState.Running when job.CancelRequested => "stopping",
+                JobState.Running => $"running since {Time(job.StartedAt ?? job.CreatedAt)}",
+                JobState.Queued when job.NotBefore is { } at && at > now => $"queued, starts after {Time(at)}",
+                _ => State(job),
+            };
+            var flags = (job.Full ? ", full" : "") + (job.DryRun ? ", dry run" : "");
+            output.WriteLine($"{job.Id}  {job.Repo}#{job.Number}  {job.AgentId}{flags}  {state}");
+        }
+    }
+
     public static void PrintJob(JobDetails details, TextWriter output)
     {
         var job = details.Job;

@@ -187,6 +187,28 @@ public sealed class ReviewRunnerTests : IDisposable
         Assert.Equal(retryAt, job.RetryAt);
     }
 
+    [Fact]
+    public async Task RunQueued_ReviewsTheClaimedJob_UnderTheConfigItRunsWith()
+    {
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("Fine.", []), dryRun: true);
+        var pr = request.PullRequest;
+        await _store!.EnqueueAsync(
+            new JobRecord
+            {
+                Id = "queued", Host = ReviewStore.Host(pr.Repo), Repo = pr.Repo.ToString(), Number = pr.Number,
+                ConfigHash = "old", AgentId = "claude-code", AppVersion = "test",
+            },
+            Ct);
+        Assert.True(await _store.TryClaimJobAsync("queued", Ct));
+
+        var outcome = await runner.RunQueuedAsync("queued", request, Ct);
+
+        Assert.Equal("queued", outcome.JobId);
+        Assert.Empty(provider.Published);
+        var job = Assert.Single(await _store.ListJobsAsync(null, 10, Ct)).Job;
+        Assert.Equal((JobState.Succeeded, "cfg123", "fake", true), (job.State, job.ConfigHash, job.AgentId, job.DryRun));
+    }
+
     private sealed class FakeAgent(FindingsReport? report, Exception? error) : IReviewAgent
     {
         public string Id => "fake";

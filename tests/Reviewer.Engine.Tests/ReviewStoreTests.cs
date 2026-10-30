@@ -181,11 +181,4 @@ public sealed class ReviewStoreTests : IDisposable
         Assert.Equal(["p1"], (await store.GetPreviousReviewAsync(Pr, Ct))!.State.CommitPatchIds);
         Assert.Equal("f1", (await store.GetPreviousReviewAsync(Pr, Ct))!.State.FilePatchIds["a.cs"]);
     }
-
-        private sealed class ManualTime(DateTimeOffset now) : TimeProvider
-    {
-        public DateTimeOffset Now { get; set; } = now;
-
-        public override DateTimeOffset GetUtcNow() => Now;
-    }
 }

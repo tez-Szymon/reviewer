@@ -17,6 +17,9 @@ public sealed record ReviewerPaths(string Root)
     /// <summary>The SQLite database with jobs, findings and each PR's last review.</summary>
     public string Database => Path.Combine(Root, State.ReviewStore.FileName);
 
+    /// <summary>Held by <c>reviewer serve</c> while it runs, so only one engine works the queue.</summary>
+    public string EngineLock => Path.Combine(Root, "engine.lock");
+
     /// <summary>Per-job folders: worktree plus numbered attempt folders.</summary>
     public string Jobs => Path.Combine(Root, "jobs");
 

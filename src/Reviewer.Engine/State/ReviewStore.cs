@@ -24,7 +24,7 @@ public sealed record OpenFinding(Finding Finding, string Fingerprint, string Hea
 /// The engine's persistent state: jobs, their findings, and each PR's last published review. Each call uses its own
 /// short-lived context, so the store is safe to share; SQLite's WAL mode lets a CLI read while the engine writes.
 /// </summary>
-public sealed class ReviewStore
+public sealed partial class ReviewStore
 {
     public const string FileName = "reviewer.db";
 
@@ -61,11 +61,18 @@ public sealed class ReviewStore
     /// </summary>
     public async Task<string> StartJobAsync(JobRecord job, CancellationToken ct)
     {
-        var baseId = job.Id;
         var now = _time.GetUtcNow();
         job.State = JobState.Running;
         job.CreatedAt = now;
         job.StartedAt = now;
+        job.RunnerPid = Environment.ProcessId;
+        return await AddJobAsync(job, ct).ConfigureAwait(false);
+    }
+
+    // Inserts the job, suffixing its id when it's taken.
+    private async Task<string> AddJobAsync(JobRecord job, CancellationToken ct)
+    {
+        var baseId = job.Id;
         for (var n = 2; ; n++)
         {
             await using var db = new ReviewerDb(_options);

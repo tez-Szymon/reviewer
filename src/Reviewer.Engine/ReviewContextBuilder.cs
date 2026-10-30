@@ -200,9 +200,12 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
     }
 
     /// <summary>A readable, sortable id such as <c>20261030-120000-acme-app-7</c>, safe as a folder name.</summary>
-    public string NewJobId(PullRequestRef pr)
+    public string NewJobId(PullRequestRef pr) => JobId(pr, time.GetUtcNow());
+
+    /// <inheritdoc cref="NewJobId"/>
+    public static string JobId(PullRequestRef pr, DateTimeOffset now)
     {
-        var stamp = time.GetUtcNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        var stamp = now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         var name = $"{stamp}-{pr.Repo.Owner}-{pr.Repo.Name}-{pr.Number}";
         return string.Concat(name.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_'));
     }

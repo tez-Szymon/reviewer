@@ -8,6 +8,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Reviewer.Engine.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Config\defaults.yaml" LogicalName="Reviewer.Engine.defaults.yaml" />
   </ItemGroup>
 

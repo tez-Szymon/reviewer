@@ -74,11 +74,26 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
                 AgentId = agent.Id,
                 AppVersion = ReviewStore.AppVersion,
                 DryRun = request.Policy.DryRun,
+                Full = request.Full,
             },
             ct).ConfigureAwait(false);
+        return await RunJobAsync(jobId, request, queued: false, ct).ConfigureAwait(false);
+    }
 
+    /// <summary>Runs a queued job that this process has claimed with <see cref="ReviewStore.TryClaimJobAsync"/>.</summary>
+    /// <exception cref="AgentException">The agent is unavailable, throttled, failed or returned invalid output.</exception>
+    public Task<ReviewOutcome> RunQueuedAsync(string jobId, ReviewRequest request, CancellationToken ct) =>
+        RunJobAsync(jobId, request, queued: true, ct);
+
+    private async Task<ReviewOutcome> RunJobAsync(string jobId, ReviewRequest request, bool queued, CancellationToken ct)
+    {
         try
         {
+            if (queued)
+            {
+                await store.SetJobConfigAsync(jobId, request.ConfigHash, agent.Id, request.Policy.DryRun, ct).ConfigureAwait(false);
+            }
+
             return await ReviewAsync(jobId, request, ct).ConfigureAwait(false);
         }
         catch (AgentThrottledException e)

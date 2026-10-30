@@ -106,6 +106,9 @@ namespace Reviewer.Engine.State.Migrations
                     b.Property<string>("BaseSha")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("CancelRequested")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ConfigHash")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -131,6 +134,9 @@ namespace Reviewer.Engine.State.Migrations
                     b.Property<long?>("FinishedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Full")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("HeadSha")
                         .HasColumnType("TEXT");
 
@@ -138,6 +144,9 @@ namespace Reviewer.Engine.State.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT")
                         .UseCollation("NOCASE");
+
+                    b.Property<long?>("NotBefore")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Number")
                         .HasColumnType("INTEGER");
@@ -153,6 +162,9 @@ namespace Reviewer.Engine.State.Migrations
                     b.Property<long?>("RetryAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("RunnerPid")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("StartedAt")
                         .HasColumnType("INTEGER");
 
@@ -166,6 +178,8 @@ namespace Reviewer.Engine.State.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt");
+
+                    b.HasIndex("State");
 
                     b.HasIndex("Host", "Repo", "Number");
 
