@@ -1,5 +1,6 @@
 using System.Globalization;
 using Reviewer.Core.Providers;
+using Reviewer.Engine;
 using Reviewer.Engine.State;
 
 namespace Reviewer.Cli;
@@ -30,12 +31,16 @@ internal static class HistoryPrinter
         output.WriteLine($"Job {job.Id}");
         output.WriteLine($"  PR:       {job.Host}/{job.Repo}/pull/{job.Number}");
         output.WriteLine($"  Head:     {job.HeadSha ?? "-"} (base {job.BaseSha ?? "-"})");
+        if (job.Delta is { } delta)
+        {
+            output.WriteLine($"  Delta:    {delta}{(delta is DeltaKind.Unchanged ? "" : $" from {job.DeltaFrom}")}");
+        }
         output.WriteLine($"  Started:  {Time(job.StartedAt ?? job.CreatedAt)}{(job.FinishedAt is { } end ? $", finished {Time(end)}" : "")}");
         output.WriteLine($"  Agent:    {job.AgentId}, config {job.ConfigHash}, reviewer {job.AppVersion}");
         output.WriteLine($"  Result:   {(job.State == JobState.Succeeded ? Outcome(job) : State(job))}");
         if (job.Error is { } error)
         {
-            output.WriteLine($"  Error:    {error}");
+            output.WriteLine($"  {(job.State == JobState.Skipped ? "Reason:  " : "Error:   ")} {error}");
         }
 
         if (job.AttemptFolder is { } folder)
@@ -62,11 +67,12 @@ internal static class HistoryPrinter
             {
                 FindingDisposition.Inline => "Inline",
                 FindingDisposition.Summary => "In the summary only",
+                FindingDisposition.AlreadyPosted => "Already on the PR",
                 _ => "Filtered out",
             }} ({findings.Count}):");
             foreach (var f in findings)
             {
-                var flag = f.Blocking ? " BLOCKING" : "";
+                var flag = (f.Blocking ? " BLOCKING" : "") + (f.ResolvedByJobId is { } by ? $" fixed in {by}" : "");
                 output.WriteLine($"  [{f.Severity.ToString().ToLowerInvariant()}/{f.Category.ToString().ToLowerInvariant()} {f.Confidence.ToString("0.00", CultureInfo.InvariantCulture)}{flag}] {f.File}:{f.StartLine} {f.Title}");
             }
         }
@@ -86,6 +92,7 @@ internal static class HistoryPrinter
     private static string State(JobRecord job) => job.State switch
     {
         JobState.Throttled when job.RetryAt is { } at => $"throttled until {Time(at)}",
+        JobState.Skipped => "skipped, nothing new",
         _ => job.State.ToString().ToLowerInvariant(),
     };
 

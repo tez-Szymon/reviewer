@@ -5,10 +5,15 @@ using Reviewer.Core.Agents;
 using Reviewer.Core.Findings;
 using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
+using Reviewer.Engine.State;
 using Reviewer.Git;
 using Reviewer.Instructions;
 
 namespace Reviewer.Engine;
+
+/// <summary>What to review, from <see cref="ReviewContextBuilder.PlanAsync"/>.</summary>
+/// <param name="Current">What the PR looks like now, stored as the reviewed state if the review is published.</param>
+public sealed record DeltaPlan(ReviewDelta Delta, ReviewedState Current);
 
 /// <summary>Where to fetch a PR from. Provider-specific, e.g. <c>refs/pull/7/head</c> on GitHub.</summary>
 /// <param name="Credential">Used for this fetch only; never written to the job folder or the agent's environment.</param>
@@ -48,8 +53,8 @@ public sealed class PreparedReview(IGitRepository git, string jobId, string jobF
 /// Context builder: fetches the PR, checks out its head, computes the delta and writes the agent's input files.
 /// </summary>
 /// <remarks>
-/// M1 reviews the whole PR: the delta runs from the merge base to the head. Repo agent files come from the base
-/// branch only, so the PR can't add instructions for its own review.
+/// The delta is planned by <see cref="DeltaPlanner"/>: the whole PR the first time, what's new after that. Repo agent
+/// files come from the base branch only, so the PR can't add instructions for its own review.
 /// </remarks>
 public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths, TimeProvider time)
 {
@@ -67,28 +72,39 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    /// <param name="tokenOwner">Login of the account that will publish the review, for the self-PR rule.</param>
-    /// <exception cref="GitException">
-    /// Fetching failed, or the snapshot's head is no longer reachable (force-pushed since the snapshot was taken).
-    /// </exception>
-    /// <param name="jobId">From <see cref="NewJobId"/>; names the job folder.</param>
-    public async Task<PreparedReview> PrepareAsync(
-        string jobId,
-        PullRequestSnapshot snapshot,
-        ReviewSource source,
-        string tokenOwner,
-        InstructionSettings instructions,
-        TimeSpan timeout,
-        CancellationToken ct)
+    /// <summary>Fetches the PR's head and base, then works out what's new since <paramref name="previous"/>.</summary>
+    /// <param name="previous">What the last published review covered; null reviews the whole PR.</param>
+    /// <exception cref="GitException">Fetching failed.</exception>
+    public async Task<DeltaPlan> PlanAsync(PullRequestSnapshot snapshot, ReviewSource source, ReviewedState? previous, CancellationToken ct)
     {
         var pr = snapshot.Ref;
-        var prefix = $"refs/reviewer/pr/{pr.Number}";
+        var prefix = RefPrefix(pr);
         await git.FetchAsync(
             source.RemoteUrl,
             [$"{source.HeadRef}:{prefix}/head", $"refs/heads/{snapshot.BaseBranch}:{prefix}/base"],
             source.Credential,
             ct).ConfigureAwait(false);
 
+        var mergeBase = await git.MergeBaseAsync(snapshot.BaseSha, snapshot.HeadSha, ct).ConfigureAwait(false);
+        var (delta, current) = await DeltaPlanner.PlanAsync(git, mergeBase, snapshot.HeadSha, previous, ct).ConfigureAwait(false);
+        return new DeltaPlan(delta, current);
+    }
+
+    /// <param name="jobId">From <see cref="NewJobId"/>; names the job folder.</param>
+    /// <param name="plan">From <see cref="PlanAsync"/>; the PR must not be <see cref="DeltaKind.Unchanged"/>.</param>
+    /// <param name="tokenOwner">Login of the account that will publish the review, for the self-PR rule.</param>
+    /// <exception cref="GitException">The snapshot's head is no longer reachable (force-pushed since the snapshot was taken).</exception>
+    public async Task<PreparedReview> PrepareAsync(
+        string jobId,
+        PullRequestSnapshot snapshot,
+        DeltaPlan plan,
+        string tokenOwner,
+        InstructionSettings instructions,
+        TimeSpan timeout,
+        CancellationToken ct)
+    {
+        var pr = snapshot.Ref;
+        var delta = plan.Delta;
         var jobFolder = Path.Combine(paths.Jobs, jobId);
         var attempt = CreateAttempt(jobFolder);
         // One worktree per attempt, so two runs that land in the same job folder can't collide.
@@ -97,9 +113,8 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
 
         try
         {
-            var mergeBase = await git.MergeBaseAsync(snapshot.BaseSha, snapshot.HeadSha, ct).ConfigureAwait(false);
-            var patch = await git.DiffAsync(mergeBase, snapshot.HeadSha, ct).ConfigureAwait(false);
-            var changed = await git.ChangedFilesAsync(mergeBase, snapshot.HeadSha, ct).ConfigureAwait(false);
+            var patch = await git.DiffAsync(delta.FromSha, snapshot.HeadSha, ct, delta.Paths).ConfigureAwait(false);
+            var changed = await git.ChangedFilesAsync(delta.FromSha, snapshot.HeadSha, ct, delta.Paths).ConfigureAwait(false);
             var agentFiles = instructions.AgentFileMode == RepoAgentFileMode.Ignore
                 ? []
                 : await ReadAgentFilesAsync(snapshot.BaseSha, ct).ConfigureAwait(false);
@@ -116,7 +131,7 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
                 snapshot.BaseBranch,
                 snapshot.BaseSha,
                 snapshot.HeadSha,
-                new DeltaJson(mergeBase, snapshot.HeadSha),
+                new DeltaJson(delta.FromSha, snapshot.HeadSha, JsonNamingPolicy.KebabCaseLower.ConvertName(delta.Kind.ToString()), delta.Reason),
                 snapshot.IsDraft,
                 snapshot.Labels,
                 [.. changed.Select(f => new ChangedFileJson(f.Path, [.. f.Lines.Select(l => new LineSpanJson(l.Start, l.End))]))]);
@@ -142,6 +157,35 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
             throw;
         }
     }
+
+    /// <summary>
+    /// Fingerprints of <paramref name="open"/> findings whose lines changed between the head they were reported
+    /// against and <paramref name="head"/>. A finding whose old head is gone counts as untouched, so it stays open.
+    /// </summary>
+    public async Task<IReadOnlySet<string>> FindTouchedAsync(IReadOnlyList<OpenFinding> open, string head, CancellationToken ct)
+    {
+        var touched = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in open.GroupBy(o => o.HeadSha, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!await git.HasCommitAsync(group.Key, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            var changed = await git.ChangedOldLinesAsync(group.Key, head, ct).ConfigureAwait(false);
+            touched.UnionWith(group
+                .Where(o => changed.TryGetValue(o.Finding.File, out var spans) && spans.Any(s => s.Overlaps(o.Finding.StartLine, o.Finding.EndLine)))
+                .Select(o => o.Fingerprint));
+        }
+
+        return touched;
+    }
+
+    /// <summary>Keeps the reviewed head in the local repository, so a later force-push can't let git prune it.</summary>
+    public Task KeepReviewedHeadAsync(PullRequestRef pr, string headSha, CancellationToken ct) =>
+        git.UpdateRefAsync($"{RefPrefix(pr)}/reviewed", headSha, ct);
+
+    private static string RefPrefix(PullRequestRef pr) => $"refs/reviewer/pr/{pr.Number}";
 
     // Best effort: a leftover worktree is pruned later and must not hide the review's own outcome.
     internal static async Task RemoveWorktreeQuietlyAsync(IGitRepository git, string worktree)
@@ -208,7 +252,7 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         IReadOnlyList<string> Labels,
         IReadOnlyList<ChangedFileJson> ChangedFiles);
 
-    private sealed record DeltaJson(string From, string To);
+    private sealed record DeltaJson(string From, string To, string Kind, string Reason);
 
     private sealed record ChangedFileJson(string Path, IReadOnlyList<LineSpanJson> Lines);
 

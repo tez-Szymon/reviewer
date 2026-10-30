@@ -57,4 +57,11 @@ public sealed record ReviewPlan(
     ReviewDecision Decision,
     bool Merge,
     bool UnresolvedThreads,
-    IReadOnlyList<string> Reasons);
+    IReadOnlyList<string> Reasons)
+{
+    /// <summary>Blocking findings from earlier reviews that are still open; they count toward the decision but aren't posted again.</summary>
+    public IReadOnlyList<Finding> OpenBlockingFindings { get; init; } = [];
+
+    /// <summary>Kept findings left out of this review's comments because the PR already has them.</summary>
+    public IReadOnlyList<Finding> AlreadyPosted { get; init; } = [];
+}

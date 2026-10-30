@@ -235,16 +235,22 @@ The scheduler polls each repo on an interval (default 60 s, with ETags) and crea
 - `onReassignment` and `onReviewRequested`.
 - `manual` from the app or CLI.
 
-**Delta strategy.** Per PR the engine stores `lastReviewedHead`, `lastReviewedBase`, the reviewed patch-ids per file, and the fingerprints of published findings.
+**Delta strategy** (`DeltaPlanner`). After each *published* review the engine stores, per PR, the reviewed head and base, the patch-ids of the PR's commits, and a per-file hash of the PR's change (changed lines only, whitespace collapsed, so a rebase doesn't change it). It also points `refs/reviewer/pr/<n>/reviewed` at the reviewed head in its local repository, so a force-push can't get that commit pruned. Dry runs store nothing.
 
-1. New head contains `lastReviewedHead` (`merge-base --is-ancestor`) → normal push. Delta = `lastReviewedHead..newHead`.
-2. Not an ancestor → rebase or force-push. Compute patch-ids for the commits in `base..newHead` and match them to the stored ones. Unmatched commits form the delta. Matched commits are skipped.
-3. Patch-ids don't line up (squash, heavy edit) → per-file comparison: diff each file's `base..lastHead` change against its `base..newHead` change. Files whose PR-introduced change is identical are skipped.
-4. Everything else → full review. Dedup still prevents duplicate comments.
+0. Head unchanged → skip; the agent doesn't run. `--full`, or a config hash different from the last review's, reviews the head again in full.
+1. New head contains the last reviewed head → normal push. Delta = `lastReviewedHead..newHead`, limited to files the PR changes, so merging the base branch in doesn't review the base's changes. No PR file changed → skip.
+2. Not an ancestor → rebase or force-push. Match the PR's commits (oldest first) to the stored patch-ids. If a leading run matches and everything after it is new, delta = last matched commit (its new SHA) `..newHead`. All matched → skip. Merges or empty commits in the range, or a mixed order, fall through.
+3. Per-file: files whose hash equals the stored one are skipped; delta = `mergeBase..newHead` limited to the rest. None left → skip.
+4. Nothing matched → full review.
 
-The agent always gets the whole PR checkout, so it can read surrounding code. Only the review target is narrowed to the delta.
+The agent always gets the whole PR checkout, so it can read surrounding code. Only the review target is narrowed. `context.json` names the delta's kind and reason, and the core contract tells the agent that on a re-review the rest was reviewed already.
 
-**Comment lifecycle on re-review**: a published finding whose fingerprint doesn't reappear and whose lines changed is resolved with a short note. A fingerprint that reappears isn't posted again.
+**Findings across reviews.** A finding posted by a published review (inline or in the summary) stays *open* until a later review resolves it:
+
+- **Resolved** when its lines changed since the head it was reported against (old-side lines of `thatHead..newHead`; a deleted file counts as changed) and the agent didn't report its fingerprint again. Resolutions are recorded in the database and counted in the review summary. Resolving the GitHub thread comes next.
+- **Still open** otherwise, including when reported again. It isn't posted again, and the PR's own comments with our fingerprint marker are checked as well. An open blocking finding keeps blocking under the current policy's filter and blocking rules, wherever it is, so `approve` and `gate` never approve a PR on a delta that left an earlier blocker untouched.
+
+If the head an open finding was reported against is gone, it counts as untouched and stays open.
 
 ## Configuration
 
@@ -339,7 +345,7 @@ Stack: Avalonia 11 + CommunityToolkit.Mvvm, a FluentAvalonia-style theme, tray i
 
 ```text
 reviewer status                     # engine + agents health
-reviewer review <pr-url> [--dry-run] [--agent codex]
+reviewer review <pr-url> [--dry-run] [--full] [--agent codex]
 reviewer queue | history | show <job-id>
 reviewer repos add <url> | list
 reviewer config validate | show [repo]
@@ -351,10 +357,10 @@ reviewer serve                      # run the engine headless
 **Storage.** SQLite at `~/.reviewer/reviewer.db` via EF Core, in WAL mode so the CLI can read while the engine writes. The engine applies pending migrations when it opens the database; migrations live in `Reviewer.Engine/State/Migrations` and are added with the repo's local `dotnet ef` tool. Tables:
 
 - `Jobs`: one row per job folder. State machine Queued, Running, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, summary, error and retry time. Failed and throttled runs are recorded too.
-- `Findings`: every finding the agent reported, in report order, with what the policy did with it (`inline`, `summary`, `dropped`), whether it blocked, and the fingerprint for kept ones.
-- `PullRequests`: each PR's last *published* review (head, base, job). Dry runs don't move it, since nothing reached the PR.
+- `Findings`: every finding the agent reported, in report order, with what the policy did with it (`inline`, `summary`, `already-posted`, `dropped`), whether it blocked, its fingerprint, and the job that resolved it.
+- `PullRequests`: each PR's last *published* review (head, base, job, commit patch-ids, per-file hashes). Dry runs don't move it, since nothing reached the PR.
 
-Added by later M2 slices: patch-ids on `PullRequests` for rebase matching, `PollState` (ETags, last seen) for the scheduler. Published comments aren't mirrored: each one carries its fingerprint in a hidden marker, and `GetOwnCommentsAsync` reads them back from the provider. Hosts and repo names compare case-insensitively. Job folders are pruned after N days; findings stay in the DB.
+Added by a later M2 slice: `PollState` (ETags, last seen) for the scheduler. Published comments aren't mirrored: each one carries its fingerprint in a hidden marker, and `GetOwnCommentsAsync` reads them back from the provider. Hosts and repo names compare case-insensitively. Job folders are pruned after N days; findings stay in the DB.
 
 **Secrets.** Tokens are kept in the OS credential store: macOS Keychain, Windows Credential Manager, libsecret on Linux. Config holds only references. Tokens are never written into job folders, logs or the agent's environment. Git fetches use a credential helper scoped to the engine.
 

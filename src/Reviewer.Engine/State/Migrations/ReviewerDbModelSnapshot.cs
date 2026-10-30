@@ -61,6 +61,9 @@ namespace Reviewer.Engine.State.Migrations
                     b.Property<int>("Ordinal")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ResolvedByJobId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Severity")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -111,6 +114,12 @@ namespace Reviewer.Engine.State.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Decision")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Delta")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeltaFrom")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("DryRun")
@@ -196,6 +205,14 @@ namespace Reviewer.Engine.State.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT")
                         .UseCollation("NOCASE");
+
+                    b.PrimitiveCollection<string>("ReviewedCommitPatchIds")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReviewedFilePatchIds")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Key");
 

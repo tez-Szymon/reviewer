@@ -64,13 +64,15 @@ public class PolicyEngineTests
         ReviewPolicy? policy = null,
         PullRequestSnapshot? snapshot = null,
         ProviderCapabilities? capabilities = null,
-        ReviewScope? scope = null) =>
+        ReviewScope? scope = null,
+        IReadOnlyList<Finding>? open = null) =>
         PolicyEngine.Decide(
             new FindingsReport("summary", findings),
             snapshot ?? Snapshot,
             policy ?? Policy,
             capabilities ?? GitHub,
-            scope ?? Scope);
+            scope ?? Scope,
+            open);
 
     private static Finding Blocker => F("b1", Severity.Major, Category.Security);
 
@@ -283,5 +285,33 @@ public class PolicyEngineTests
     public void Decide_NeverMergesOutsideGateMerge()
     {
         Assert.False(Decide([F("n1")], Policy with { Mode = ReviewMode.Gate }).Merge);
+    }
+
+    [Theory]
+    [InlineData(ReviewMode.Gate, ReviewDecision.RequestChanges)]
+    [InlineData(ReviewMode.Approve, ReviewDecision.None)]
+    [InlineData(ReviewMode.Comment, ReviewDecision.None)]
+    public void Decide_OpenBlockingFindingFromEarlierReview_StillBlocks_EvenOutsideTheDelta(ReviewMode mode, ReviewDecision expected)
+    {
+        var earlier = F("old", Severity.Major, Category.Security, file: "src/Untouched.cs", line: 3);
+
+        var plan = Decide([F("n1")], Policy with { Mode = mode }, open: [earlier]);
+
+        Assert.Equal(expected, plan.Decision);
+        Assert.Equal([earlier], plan.OpenBlockingFindings);
+        Assert.DoesNotContain(earlier, plan.InlineFindings.Concat(plan.SummaryFindings));
+        Assert.Empty(plan.BlockingFindingIds);
+    }
+
+    [Theory]
+    [InlineData(Severity.Minor, 0.9, "src/Foo.cs")] // No longer matches a blocking rule.
+    [InlineData(Severity.Major, 0.3, "src/Foo.cs")] // Below the current confidence threshold.
+    [InlineData(Severity.Major, 0.9, "yarn.lock")] // Now in an ignored path.
+    public void Decide_OpenFinding_IsJudgedByTheCurrentPolicy(Severity severity, double confidence, string file)
+    {
+        var plan = Decide([], open: [F("old", severity, Category.Security, confidence, file)]);
+
+        Assert.Equal(ReviewDecision.Approve, plan.Decision);
+        Assert.Empty(plan.OpenBlockingFindings);
     }
 }

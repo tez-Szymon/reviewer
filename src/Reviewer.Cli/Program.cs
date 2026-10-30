@@ -29,6 +29,7 @@ var prUrl = new Argument<Uri>("pr-url")
     },
 };
 var dryRun = new Option<bool>("--dry-run") { Description = "Show the review plan without publishing it" };
+var full = new Option<bool>("--full") { Description = "Review the whole PR, not only what's new since the last review" };
 var agent = new Option<string?>("--agent") { Description = "Agent to use instead of the configured one" };
 var model = new Option<string?>("--model") { Description = "Model for the agent, e.g. sonnet or opus; overrides the config" };
 var minConfidence = new Option<double?>("--min-confidence")
@@ -53,7 +54,7 @@ var paths = ReviewerPaths.Default;
 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 var configJson = new JsonSerializerOptions(ConfigLoader.JsonOptions) { WriteIndented = true };
 
-var review = new Command("review", "Review one pull request now") { prUrl, dryRun, agent, model, minConfidence };
+var review = new Command("review", "Review one pull request now") { prUrl, dryRun, full, agent, model, minConfidence };
 review.SetAction(async (parse, ct) =>
 {
     if (!GitHubUrls.TryParsePullRequest(parse.GetValue(prUrl)!, out var pr))
@@ -109,7 +110,8 @@ review.SetAction(async (parse, ct) =>
             },
             await effective.Policy.Instructions.LoadAsync(paths, home, ct),
             effective.Agent.Timeout,
-            effective.Hash);
+            effective.Hash,
+            parse.GetValue(full));
 
         Console.Error.WriteLine($"Reviewing {pr.Repo}#{pr.Number}; this can take several minutes...");
         ReviewPrinter.Print(await reviewer.RunAsync(request, ct), Console.Out);

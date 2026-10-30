@@ -90,11 +90,13 @@ public sealed class GitRepository : IGitRepository
     public async Task<string> MergeBaseAsync(string sha1, string sha2, CancellationToken ct) =>
         (await RunAsync(["merge-base", sha1, sha2], ct).ConfigureAwait(false)).Trim();
 
-    public Task<string> DiffAsync(string fromSha, string toSha, CancellationToken ct) =>
-        RunAsync(["diff", "--no-color", "--no-ext-diff", "--find-renames", fromSha, toSha, "--"], ct);
+    public Task<string> DiffAsync(string fromSha, string toSha, CancellationToken ct, IReadOnlyCollection<string>? paths = null) =>
+        RunAsync(["diff", "--no-color", "--no-ext-diff", "--find-renames", fromSha, toSha, "--", .. Pathspecs(paths)], ct);
 
-    public async Task<IReadOnlyList<ChangedFile>> ChangedFilesAsync(string fromSha, string toSha, CancellationToken ct)
+    public async Task<IReadOnlyList<ChangedFile>> ChangedFilesAsync(
+        string fromSha, string toSha, CancellationToken ct, IReadOnlyCollection<string>? paths = null)
     {
+        // Renames are detected across the whole diff and then filtered, so a path limit can't turn a rename into an add.
         var nameStatus = await RunAsync(
             ["diff", "--name-status", "-z", "--find-renames", "--no-ext-diff", fromSha, toSha, "--"], ct).ConfigureAwait(false);
         var patch = await RunAsync(
@@ -103,8 +105,30 @@ public sealed class GitRepository : IGitRepository
 
         var lines = DiffParser.ParseChangedLines(patch);
         return [.. DiffParser.ParseNameStatus(nameStatus)
+            .Where(p => paths is null || paths.Contains(p))
             .Select(p => new ChangedFile(p, lines.TryGetValue(p, out var spans) ? spans : []))];
     }
+
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<LineSpan>>> ChangedOldLinesAsync(string fromSha, string toSha, CancellationToken ct)
+    {
+        var patch = await RunAsync(
+            ["-c", "core.quotePath=false", "diff", "--unified=0", "--no-color", "--no-ext-diff", "--find-renames", fromSha, toSha, "--"],
+            ct).ConfigureAwait(false);
+        return DiffParser.ParseOldChangedLines(patch);
+    }
+
+    public async Task<bool> HasCommitAsync(string sha, CancellationToken ct) =>
+        (await RunRawAsync(["cat-file", "-e", $"{sha}^{{commit}}"], null, ct).ConfigureAwait(false)).ExitCode == 0;
+
+    public Task UpdateRefAsync(string name, string sha, CancellationToken ct) => RunAsync(["update-ref", name, sha], ct);
+
+    public async Task<IReadOnlyList<string>> CommitsAsync(string range, CancellationToken ct) =>
+        (await RunAsync(["rev-list", "--reverse", range, "--"], ct).ConfigureAwait(false))
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+    // Literal paths: a file named "*.cs" or ":(glob)x" must not be read as a pattern.
+    private static IEnumerable<string> Pathspecs(IReadOnlyCollection<string>? paths) =>
+        paths?.Select(p => ":(literal)" + p) ?? [];
 
     public async Task<string?> ReadFileAsync(string sha, string path, CancellationToken ct)
     {
