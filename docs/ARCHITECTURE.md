@@ -348,7 +348,28 @@ The effective config per job is computed and stored with the review. A policy ch
 
 ## Local API, desktop and CLI
 
-**Local API.** ASP.NET Core minimal API hosted inside the engine, listening on a Unix domain socket on macOS/Linux and a named pipe or Unix socket on Windows. No TCP port means other users and browser pages can't reach it. Endpoints: jobs (list, get, retry, cancel), PRs (status, history), findings, config (get, validate, save), repos (browse, add), agents (health), plus `/events` as Server-Sent Events for live queue updates. A generated OpenAPI spec feeds a typed client shared by CLI and desktop.
+**Local API.** ASP.NET Core minimal API hosted inside the engine (`Reviewer.Api`), listening on a Unix domain socket, `engine.sock` in the data folder, on every OS (Windows 10 and later support them too). No TCP port means other users and browser pages can't reach it; the socket file is made owner-only (`0600`) on macOS and Linux. `reviewer serve` starts it next to the scheduler and queue worker, replaces a socket file a stopped engine left behind (the engine lock says none is running), and removes it on exit. If the socket can't be opened, for example because the path is too long for one, the engine logs it and reviews without its API.
+
+| Endpoint | |
+|---|---|
+| `GET /status` | Engine version, process id, start time, data folder |
+| `GET /agents` | Each agent's health: installed, logged in, version |
+| `GET /queue` | Queued, running and throttled jobs, oldest first |
+| `GET /jobs?repo=&number=&limit=` | Past and current jobs, newest first, with finding counts |
+| `GET /jobs/{id}` | One job with its findings, by id or unique start |
+| `POST /jobs` | Queue a review (`{url, dryRun, full, agent}`), as `reviewer queue add` |
+| `POST /jobs/{id}/cancel`, `/retry` | As `reviewer queue cancel` and `retry` |
+| `GET /pulls/{owner}/{repo}/{number}?host=` | A PR's last published review, open findings and jobs |
+| `GET /config`, `/config/repos/{owner}/{repo}` | The merged config, and a repo's effective settings |
+| `POST /config/validate` | Check a `config.yaml` body (`application/yaml` or `text/plain`) without saving it |
+| `GET /events` | Server-Sent Events: a `job` event per change to a job |
+| `GET /openapi/v1.json` | The OpenAPI spec |
+
+Responses are JSON with camelCase keys and kebab-case enum values, as in the config; errors are problem details. The API reads the same database as the CLI and reads the config file on each request, so it shows what the CLI changed and the config the next job will use. Writes wake the queue worker, so a queued, cancelled or retried job is acted on at once instead of at the next poll.
+
+**Events.** Every insert or update of a job, by any process, gives it a new `Version`: SQLite triggers set it to one past the highest, and since SQLite runs one write at a time, versions commit in order. `/events` polls for versions past the last one it sent (every second) and sends each changed job in its latest state, with its version as the event id; a job that changed twice between polls is sent once. A stream starts from now, from `?after=<version>`, or from `Last-Event-ID` when an `EventSource` reconnects, so a reconnect misses nothing. A client opens the stream first, then loads the lists, and keeps the higher version of each job. `reviewer watch` prints the stream.
+
+Config save and repo browsing come with the desktop app in M3, which needs them for its Settings and Repos screens; until then `config.yaml` is edited by hand. The OpenAPI spec is there for the desktop's typed client; `EngineClient` in `Reviewer.Api` is the hand-written client the CLI uses for now.
 
 **Engine lifetime.** The desktop app starts the engine as a child process if none is running and offers "start at login" (LaunchAgent on macOS, Startup entry on Windows). Closing the window leaves a tray icon; quitting the app stops the engine unless "keep running" is on.
 
@@ -371,6 +392,7 @@ Stack: Avalonia 11 + CommunityToolkit.Mvvm, a FluentAvalonia-style theme, tray i
 reviewer status                     # engine + agents health
 reviewer review <pr-url> [--dry-run] [--full] [--agent codex]
 reviewer queue [add <pr-url> | cancel <job-id> | retry <job-id>]
+reviewer watch [--after <version>]  # job changes as the engine reports them
 reviewer history | show <job-id>
 reviewer repos add <url> | list
 reviewer config validate | show [repo]
@@ -381,7 +403,7 @@ reviewer serve                      # run the engine headless
 
 **Storage.** SQLite at `~/.reviewer/reviewer.db` via EF Core, in WAL mode so the CLI can read while the engine writes. The engine applies pending migrations when it opens the database; migrations live in `Reviewer.Engine/State/Migrations` and are added with the repo's local `dotnet ef` tool. Tables:
 
-- `Jobs`: one row per job folder, and the job queue. State machine Queued, Running, Skipped, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, summary, error, retry time, not-before time, full and dry-run flags, a cancel request and the process running it. Failed and throttled runs are recorded too.
+- `Jobs`: one row per job folder, and the job queue. State machine Queued, Running, Skipped, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, summary, error, retry time, not-before time, full and dry-run flags, a cancel request and the process running it. Failed and throttled runs are recorded too. A trigger-maintained `Version` orders changes for the API's events.
 - `Findings`: every finding the agent reported, in report order, with what the policy did with it (`inline`, `summary`, `already-posted`, `dropped`), whether it blocked, its fingerprint, and the job that resolved it.
 - `PullRequests`: each PR's last *published* review (head, base, job, commit patch-ids, per-file hashes). Dry runs don't move it, since nothing reached the PR.
 
@@ -397,7 +419,7 @@ Published comments aren't mirrored: each one carries its fingerprint in a hidden
 - PR content is data. Instructions come from app config and the base branch only.
 - The agent runs in a worktree with no tokens in its environment. Where the CLI supports it, use read-only or restricted tool permissions and disallow shell commands that run project code (`npm install`, test runners), since a PR can modify them.
 - Merge only if the head SHA still equals the reviewed SHA.
-- The local API listens on a socket or pipe only, never on TCP.
+- The local API listens on a Unix domain socket only, never on TCP, and only its owner can connect.
 - PRs from forks or unknown authors: configurable per repo, default `comment` mode.
 
 ## MVP milestones

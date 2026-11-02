@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Reviewer.Agents.Cli;
+using Reviewer.Api;
 using Reviewer.Cli;
 using Reviewer.Core.Agents;
 using Reviewer.Core.Providers;
@@ -182,6 +183,13 @@ status.SetAction(async (_, ct) =>
     }
 
     Console.WriteLine(github);
+    using (var client = new EngineClient(paths.Socket))
+    {
+        Console.WriteLine(await client.GetStatusAsync(ct) is { } engine
+            ? $"engine: running since {engine.StartedAt.ToLocalTime():g} (pid {engine.ProcessId}, {engine.Version}), API on {paths.Socket}"
+            : EngineRunning(paths) ? "engine: running, without its local API" : "engine: not running; start it with 'reviewer serve'");
+    }
+
     Console.WriteLine($"data: {paths.Root}");
     return health.IsReady && config is not null && github.Contains("signed in", StringComparison.Ordinal) ? 0 : 1;
 });
@@ -250,38 +258,11 @@ queueAdd.SetAction(async (parse, ct) =>
         return 1;
     }
 
-    EffectiveConfig effective;
-    try
-    {
-        effective = config.For(pr.Repo, parse.GetValue(addAgent));
-    }
-    catch (ConfigException e)
-    {
-        return Fail(e.Message);
-    }
-
-    if (effective.AgentId != AgentsConfig.ClaudeCodeId)
-    {
-        return Fail($"Agent '{effective.AgentId}' is not available yet; use claude-code.");
-    }
-
     try
     {
         var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
-        var (id, added) = await store.EnqueueAsync(
-            new JobRecord
-            {
-                Id = ReviewContextBuilder.JobId(pr, TimeProvider.System.GetUtcNow()),
-                Host = ReviewStore.Host(pr.Repo),
-                Repo = pr.Repo.ToString(),
-                Number = pr.Number,
-                ConfigHash = effective.Hash,
-                AgentId = effective.AgentId,
-                AppVersion = ReviewStore.AppVersion,
-                DryRun = parse.GetValue(addDryRun),
-                Full = parse.GetValue(addFull),
-            },
-            ct);
+        var (id, added) = await ManualReview.QueueAsync(
+            store, config, pr, parse.GetValue(addAgent), parse.GetValue(addDryRun), parse.GetValue(addFull), TimeProvider.System, ct);
         Console.WriteLine(added ? $"Queued {id}." : $"{pr.Repo}#{pr.Number} is already queued as {id}.");
         if (!EngineRunning(paths))
         {
@@ -289,6 +270,10 @@ queueAdd.SetAction(async (parse, ct) =>
         }
 
         return 0;
+    }
+    catch (ConfigException e)
+    {
+        return Fail(e.Message);
     }
     catch (Exception e) when (e is DbException or DbUpdateException)
     {
@@ -387,8 +372,24 @@ serve.SetAction(async (_, ct) =>
                 store, new QueueLauncher(paths, new ReviewFactory(paths, runner, store, home), config, Log), TimeProvider.System, Log);
             using var source = new PollSource(paths, runner);
             var scheduler = new Scheduler(store, source, TimeProvider.System, worker.Wake, Log);
+            var api = await StartApiAsync(
+                new EngineServices(paths, store, [new ClaudeCodeAgent(new ClaudeCodeOptions(), runner)], worker.Wake, TimeProvider.System, DateTimeOffset.UtcNow),
+                ct);
             Log($"Engine started on {paths.Root}, watching {config.Repos.Count} repo(s); Ctrl+C stops it.");
-            await Task.WhenAll(worker.RunAsync(ct), scheduler.RunAsync(ct));
+            try
+            {
+                await Task.WhenAll(worker.RunAsync(ct), scheduler.RunAsync(ct));
+            }
+            finally
+            {
+                if (api is not null)
+                {
+                    await api.StopAsync(CancellationToken.None);
+                    await api.DisposeAsync();
+                    File.Delete(paths.Socket);
+                }
+            }
+
             Log("Engine stopped.");
             return 0;
         }
@@ -398,10 +399,50 @@ serve.SetAction(async (_, ct) =>
         }
     }
 
+    // The engine reviews without its API, so a socket that can't be opened (e.g. a path too long for one) only warns.
+    async Task<Microsoft.AspNetCore.Builder.WebApplication?> StartApiAsync(EngineServices engine, CancellationToken ct)
+    {
+        try
+        {
+            var api = await LocalApi.StartAsync(engine, paths.Socket, Log, ct);
+            Log($"Local API on {paths.Socket}.");
+            return api;
+        }
+        catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or ArgumentException)
+        {
+            Log($"The local API couldn't start on {paths.Socket}: {e.Message} The engine runs without it.");
+            return null;
+        }
+    }
+
     static void Log(string message) => Console.WriteLine($"{DateTime.Now:HH:mm:ss} {message}");
 });
 
-var root = new RootCommand("Local-first AI code reviewer") { review, queue, serve, history, showJob, status, configCommand };
+var watchAfter = new Option<long?>("--after") { Description = "Replay changes after this event id (a job's version) first" };
+var watch = new Command("watch", "Print each change to a job as the running engine reports it, until Ctrl+C") { watchAfter };
+watch.SetAction(async (parse, ct) =>
+{
+    using var client = new EngineClient(paths.Socket);
+    try
+    {
+        await foreach (var job in client.WatchJobsAsync(parse.GetValue(watchAfter), ct))
+        {
+            HistoryPrinter.PrintChange(job, Console.Out);
+        }
+
+        return Fail("The engine stopped.");
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return 0;
+    }
+    catch (HttpRequestException e)
+    {
+        return Fail($"No engine is listening on {paths.Socket} ({e.Message}); start one with 'reviewer serve'.");
+    }
+});
+
+var root = new RootCommand("Local-first AI code reviewer") { review, queue, serve, watch, history, showJob, status, configCommand };
 
 // Stopping the engine cancels running reviews and queues them again; give that time before the process is ended.
 return await root.Parse(args).InvokeAsync(new InvocationConfiguration { ProcessTerminationTimeout = TimeSpan.FromSeconds(30) });

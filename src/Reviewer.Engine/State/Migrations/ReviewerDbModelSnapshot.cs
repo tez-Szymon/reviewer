@@ -175,15 +175,25 @@ namespace Reviewer.Engine.State.Migrations
                     b.Property<string>("Summary")
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("Version")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("State");
 
+                    b.HasIndex("Version");
+
                     b.HasIndex("Host", "Repo", "Number");
 
-                    b.ToTable("Jobs", (string)null);
+                    b.ToTable("Jobs", null, t =>
+                        {
+                            t.HasTrigger("Jobs_Version_Insert");
+
+                            t.HasTrigger("Jobs_Version_Update");
+                        });
                 });
 
             modelBuilder.Entity("Reviewer.Engine.State.PollStateRecord", b =>

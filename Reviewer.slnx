@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Reviewer.Agents.Cli/Reviewer.Agents.Cli.csproj" />
+    <Project Path="src/Reviewer.Api/Reviewer.Api.csproj" />
     <Project Path="src/Reviewer.Cli/Reviewer.Cli.csproj" />
     <Project Path="src/Reviewer.Core/Reviewer.Core.csproj" />
     <Project Path="src/Reviewer.Engine/Reviewer.Engine.csproj" />
@@ -10,6 +11,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Reviewer.Agents.Cli.Tests/Reviewer.Agents.Cli.Tests.csproj" />
+    <Project Path="tests/Reviewer.Api.Tests/Reviewer.Api.Tests.csproj" />
     <Project Path="tests/Reviewer.Core.Tests/Reviewer.Core.Tests.csproj" />
     <Project Path="tests/Reviewer.Engine.Tests/Reviewer.Engine.Tests.csproj" />
     <Project Path="tests/Reviewer.Git.Tests/Reviewer.Git.Tests.csproj" />

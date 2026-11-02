@@ -1,11 +1,12 @@
 using System.Globalization;
+using Reviewer.Api;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
 using Reviewer.Engine.State;
 
 namespace Reviewer.Cli;
 
-/// <summary>Past jobs from the store, for <c>reviewer history</c> and <c>reviewer show</c>.</summary>
+/// <summary>Jobs from the store or the engine, for <c>reviewer history</c>, <c>show</c>, <c>queue</c> and <c>watch</c>.</summary>
 internal static class HistoryPrinter
 {
     public static void PrintList(IReadOnlyList<JobSummary> jobs, TextWriter output)
@@ -101,15 +102,32 @@ internal static class HistoryPrinter
         }
     }
 
-    private static string Outcome(JobRecord job)
+    /// <summary>One change to a job for <c>reviewer watch</c>, ending with its event id to resume after.</summary>
+    public static void PrintChange(JobDto job, TextWriter output)
     {
-        var decision = job.Decision switch
+        var state = job.State switch
+        {
+            JobState.Succeeded => Outcome(job.Decision, job.Published),
+            JobState.Running when job.CancelRequested => "stopping",
+            JobState.Throttled when job.RetryAt is { } at => $"throttled until {Time(at)}",
+            JobState.Skipped => "skipped, nothing new",
+            JobState.Failed or JobState.Cancelled when job.Error is { } error => $"{job.State.ToString().ToLowerInvariant()}: {error}",
+            _ => job.State.ToString().ToLowerInvariant(),
+        };
+        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{DateTime.Now:HH:mm:ss}  {job.Id}  {job.Repo}#{job.Number}  {state}  [{job.Version}]"));
+    }
+
+    private static string Outcome(JobRecord job) => Outcome(job.Decision, job.Published);
+
+    private static string Outcome(ReviewDecision? decision, bool published)
+    {
+        var name = decision switch
         {
             ReviewDecision.Approve => "approved",
             ReviewDecision.RequestChanges => "requested changes",
             _ => "commented",
         };
-        return job.Published ? decision : $"dry run ({decision})";
+        return published ? name : $"dry run ({name})";
     }
 
     private static string State(JobRecord job) => job.State switch
