@@ -215,6 +215,28 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void Parse_GitLabAccounts_DefaultToGitLabCom_AndAllowSelfHostedPaths()
+    {
+        var config = ConfigLoader.Parse("""
+            accounts:
+              - { id: gl, provider: gitlab }
+              - { id: work, provider: gitlab, host: https://git.acme.test/gitlab, token: keychain:reviewer/work }
+            repos:
+              - { repo: acme/platform/api, account: work }
+              - { repo: acme/web, account: gl }
+            """);
+
+        Assert.Equal(new Uri("https://gitlab.com"), config.Accounts[0].Host);
+        Assert.Equal(new Uri("https://git.acme.test/gitlab"), config.Accounts[1].Host);
+        Assert.Equal(
+            [new RepoRef(new Uri("https://git.acme.test/gitlab"), "acme/platform", "api"), new RepoRef(new Uri("https://gitlab.com"), "acme", "web")],
+            config.WatchedRepos());
+
+        var api = config.For(new RepoRef(new Uri("https://git.acme.test"), "acme/platform", "api"));
+        Assert.Equal("work", api.Account.Id);
+    }
+
+    [Fact]
     public void Parse_KeychainToken_IsAccepted()
     {
         var config = ConfigLoader.Parse("accounts: [{ id: gh, token: keychain:reviewer/gh-main }]");
@@ -234,7 +256,10 @@ public class ConfigLoaderTests
     }
 
     [Theory]
-    [InlineData("accounts: [{ id: gl, provider: gitlab, host: https://gitlab.com }]", "GitLab support arrives in M3")]
+    [InlineData("accounts: [{ id: gl, provider: gitlab, host: http://git.acme.test }]", "accounts[0].host: must be an https:// URL")]
+    [InlineData("accounts: [{ id: gl, provider: gitlab, host: 'https://git.acme.test/?a=1' }]", "accounts[0].host: must be an https:// URL")]
+    [InlineData("accounts: [{ id: gl, provider: gitlab }]\nrepos: [{ repo: api }]", "repos[0].repo: must be group/project")]
+    [InlineData("accounts: [{ id: gh }]\nrepos: [{ repo: acme/platform/api }]", "repos[0].repo: must be owner/name.")]
     [InlineData("accounts: [{ id: ghe, host: https://git.acme.com }]", "only https://github.com is supported")]
     [InlineData("accounts: [{ id: gh, host: http://github.com }]", "only https://github.com is supported")]
     [InlineData("accounts: [{ id: gh, host: https://github.com:8443 }]", "only https://github.com is supported")]

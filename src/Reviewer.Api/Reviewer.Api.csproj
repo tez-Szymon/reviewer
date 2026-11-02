@@ -17,6 +17,7 @@
     <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
     <ProjectReference Include="..\Reviewer.Engine\Reviewer.Engine.csproj" />
     <ProjectReference Include="..\Reviewer.Providers.GitHub\Reviewer.Providers.GitHub.csproj" />
+    <ProjectReference Include="..\Reviewer.Providers.GitLab\Reviewer.Providers.GitLab.csproj" />
   </ItemGroup>
 
 </Project>

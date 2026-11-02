@@ -195,7 +195,10 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
                 [.. plan.InlineFindings.Select(f => new InlineComment(f, fingerprints[f]))],
                 plan.SummaryFindings,
                 plan.Decision,
-                head);
+                head)
+            {
+                WithdrawApproval = plan.WithdrawApproval,
+            };
             await provider.PublishReviewAsync(pr, result, ct).ConfigureAwait(false);
             await builder.KeepReviewedHeadAsync(pr, snapshot.HeadSha, CancellationToken.None).ConfigureAwait(false);
 

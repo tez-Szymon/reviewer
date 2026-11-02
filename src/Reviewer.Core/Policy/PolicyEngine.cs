@@ -89,9 +89,11 @@ public static class PolicyEngine
 
         // 6. Capability check.
         var unresolvedThreads = false;
+        var withdrawApproval = false;
         if (decision == ReviewDecision.RequestChanges && !capabilities.SupportsRequestChanges)
         {
             decision = ReviewDecision.None;
+            withdrawApproval = true;
             unresolvedThreads = policy.RequestChangesFallback == RequestChangesFallback.UnresolvedThreads;
             reasons.Add($"Provider can't request changes: falling back to {policy.RequestChangesFallback}.");
         }
@@ -117,6 +119,7 @@ public static class PolicyEngine
             reasons)
         {
             OpenBlockingFindings = openBlocking,
+            WithdrawApproval = withdrawApproval,
         };
     }
 

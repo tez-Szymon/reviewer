@@ -9,7 +9,7 @@ internal sealed class FakeProvider(PullRequestSnapshot snapshot) : IRepositoryPr
 
     public List<ReviewResult> Published { get; } = [];
 
-    public ProviderCapabilities Capabilities { get; } = new(true, true, true, false);
+    public ProviderCapabilities Capabilities { get; set; } = new(true, true, true, false);
 
     public Task<string> GetCurrentUserAsync(CancellationToken ct) => Task.FromResult("bob");
 

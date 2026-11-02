@@ -53,7 +53,7 @@ Solution layout:
 
 ## Repository providers
 
-Git operations are shared; the PR/MR layer is per provider behind one interface plus a capabilities object. A `ProviderFactory` resolves the adapter from the repo's host (`github.com`, `gitlab.com`, or a configured self-hosted base URL).
+Git operations are shared; the PR/MR layer is per provider behind one interface plus a capabilities object. The adapter comes from the account that serves the repo's host: `AccountConnection` in the CLI opens a `GitHubProvider` or `GitLabProvider` with the account's token, and gives git the clone URL, head ref (`refs/pull/N/head` or `refs/merge-requests/N/head`) and credentials. PR and MR URLs are read against the configured accounts (`PullRequestUrls`), since only the config says which hosts run GitLab. A GitLab project's owner is its full group path, which can nest (`group/subgroup/project`), and a self-hosted instance may be served from a path (`https://example.com/gitlab`).
 
 **Shared git layer** (`Reviewer.Git`) shells out to the `git` CLI. LibGit2Sharp has weak worktree support. Operations: shallow-ish fetch of base and head refs, `git worktree add` per job, diff between SHAs, `merge-base --is-ancestor`, `patch-id` for rebase matching.
 
@@ -70,7 +70,7 @@ public interface IRepositoryProvider
     Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct);
     Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct);
     Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct);
-    Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, CancellationToken ct);
+    Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct);
     Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct);
 }
 ```
@@ -83,16 +83,20 @@ Where GitHub and GitLab differ, and the adapter absorbs it:
 
 | Concern | GitHub | GitLab |
 |---|---|---|
-| Inline comment anchor | `path` + `line` + `side` + `commit_id` | `position` with base, start and head SHAs |
-| Approval | Review with state `APPROVE` | Approve endpoint; approval rules may apply |
-| Request changes | Review state `REQUEST_CHANGES` | No direct equivalent; unresolved threads or a note |
+| Review | One review: body, inline comments and event together | Diff discussions, then the summary as a note, then the approval |
+| Inline comment anchor | `path` + `line` + `side` + `commit_id` | `position` with the base, start and head SHAs of the MR version at the reviewed head; an unchanged line needs its old line number too |
+| Comment off the diff | The whole review is refused; it's posted again with every finding in the body | Checked against the version's diff before posting; that finding goes to the summary |
+| Approval | Review with state `APPROVE` | `approve` with the reviewed SHA; skipped if this account already approved |
+| Request changes | Review state `REQUEST_CHANGES` | None. The policy falls back, and an earlier approval by this account is withdrawn (`unapprove`) |
 | Thread resolve | GraphQL `resolveReviewThread` | Discussion `resolved` flag |
+| Suggestions | ` ```suggestion ` over the commented range | ` ```suggestion:-N+0 ` counted from the anchored line |
 | Assigned vs reviewer | Assignees and requested reviewers | Assignees and reviewers |
-| Merge | Merge methods per repo | Merge, squash; merge when pipeline succeeds |
+| CI | Combined status and check runs | The head pipeline's status |
+| Merge | Merge methods per repo | The project's merge method; only squashing is per merge |
 
 `ProviderCapabilities` exposes flags such as `SupportsRequestChanges`, `SupportsThreadResolve`, `SupportsSuggestions`, `SupportsMergeWhenGreen`. The policy engine checks these instead of assuming.
 
-HTTP: a typed `HttpClient` per provider with Polly retry and rate-limit handling. Octokit.net is optional; it lags the API in places. GitHub polling lists a repo's open PRs most recently updated first, sending the first page's ETag as `If-None-Match`; any change to a PR moves it to that page, so a 304 means nothing changed, and 304 responses don't count against the rate limit. The list carries everything the trigger rules read (head, base branch, author, assignees, requested reviewers, labels, draft flag), so polling needs no per-PR requests; `GetChangedFilesAsync` is called only when a review is about to be queued, for the size and path filters.
+HTTP: a typed `HttpClient` per provider with Polly retry and rate-limit handling. Octokit.net is optional; it lags the API in places. GitHub polling lists a repo's open PRs most recently updated first, sending the first page's ETag as `If-None-Match`; any change to a PR moves it to that page, so a 304 means nothing changed, and 304 responses don't count against the rate limit. The list carries everything the trigger rules read (head, base branch, author, assignees, requested reviewers, labels, draft flag), so polling needs no per-PR requests; `GetChangedFilesAsync` is called only when a review is about to be queued, for the size and path filters. GitLab polling sends the ETag too, but gitlab.com answers with the full list rather than a 304, so each poll reads the list; `pollSeconds` is the lever there.
 
 The token owner can't approve their own PR on either platform. The engine detects `author == token owner` and skips or downgrades to comment-only.
 
@@ -228,7 +232,7 @@ Steps:
 
 4. **Merge guards** (always applied when merging): CI green, PR mergeable, not draft, required approvals met, and the head SHA unchanged since review. The last check prevents merging commits the agent never saw.
 5. **Self-PR rule**: author equals token owner → never approve or request changes; post comments only.
-6. **Capability check**: if the provider lacks a feature (e.g. request changes on GitLab), fall back as configured (`unresolved-threads` or `comment`).
+6. **Capability check**: if the provider lacks a feature (e.g. request changes on GitLab), fall back as configured (`unresolved-threads` or `comment`). Either way the plan asks to withdraw an approval this account gave earlier, so a blocked head is never left approved.
 
 The output `ReviewPlan` lists comments to post, comments to resolve, the decision and merge intent. The publisher executes it, and the plan is stored for history and dry runs.
 
@@ -284,13 +288,13 @@ Loading is strict. Unknown or misspelt keys (keys are case-sensitive), wrong typ
 ```yaml
 accounts:
   - id: gh-main
-    provider: github           # gitlab arrives in M3
+    provider: github
     host: https://github.com
     token: env:GITHUB_TOKEN    # a reference, never the token itself: env:NAME or keychain:SERVICE/ACCOUNT
   - id: gl-work
     provider: gitlab
-    host: https://gitlab.company.com
-    token: keychain:reviewer/gl-work
+    host: https://gitlab.company.com   # https only; gitlab.com when left out; may carry a path
+    token: keychain:reviewer/gl-work   # without one, GITLAB_TOKEN
 
 agents:
   default: claude-code
@@ -334,11 +338,11 @@ repos:
       review: { mode: gate }
       instructions: { repoSkills: ["skills/payments/*.md"] }
   - account: gl-work
-    repo: platform/billing
+    repo: platform/finance/billing   # GitLab: the project's full path, subgroups included
     agent: codex
 ```
 
-Without accounts in the file there is one implicit github.com account whose token comes from `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`, as in M1. A PR in a repo without an entry is reviewed with `defaults` and the account for its host.
+Without accounts in the file there is one implicit github.com account whose token comes from `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth login`, as in M1. A GitLab account without a token reference reads `GITLAB_TOKEN`. A PR in a repo without an entry is reviewed with `defaults` and the account for its host.
 
 Each review's effective config gets a hash of the settings that shape its result: agent, agent settings, `review`, `merge` and `instructions`. Triggers are left out, since they decide whether a review happens, not what it says. The hash is part of the job key `(repo, PR, head SHA, config hash)`.
 
