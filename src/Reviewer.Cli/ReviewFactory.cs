@@ -39,7 +39,17 @@ internal sealed class ReviewFactory(ReviewerPaths paths, IProcessRunner processe
             throw new ReviewSetupException($"Only github.com is supported, not {pr.Repo.Host.Host}.");
         }
 
-        if (await GitHubToken.ResolveAsync(processes, effective.Account, ct).ConfigureAwait(false) is not { } token)
+        string? token;
+        try
+        {
+            token = await GitHubToken.ResolveAsync(processes, effective.Account, ct).ConfigureAwait(false);
+        }
+        catch (KeychainException e)
+        {
+            throw new ReviewSetupException(e.Message);
+        }
+
+        if (token is null)
         {
             throw new ReviewSetupException(GitHubToken.Missing(effective.Account));
         }

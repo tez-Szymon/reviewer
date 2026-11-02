@@ -61,7 +61,8 @@ public sealed record ReviewerConfig(
 }
 
 /// <param name="Token">
-/// A reference to the token, never the token itself: <c>env:NAME</c> reads an environment variable. Null falls back to
+/// A reference to the token, never the token itself: <c>env:NAME</c> reads an environment variable and
+/// <c>keychain:SERVICE/ACCOUNT</c> an item in the OS credential store (see <see cref="TokenReference"/>). Null falls back to
 /// <c>GITHUB_TOKEN</c>, <c>GH_TOKEN</c> and the GitHub CLI's login.
 /// </param>
 public sealed record AccountConfig(string Id, string Provider, Uri Host, string? Token);

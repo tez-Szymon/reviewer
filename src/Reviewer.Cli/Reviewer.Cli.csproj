@@ -4,7 +4,13 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>reviewer</AssemblyName>
     <RootNamespace>Reviewer.Cli</RootNamespace>
+    <!-- For the generated P/Invoke marshalling of CredReadW in OsKeychain. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Reviewer.Cli.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" />

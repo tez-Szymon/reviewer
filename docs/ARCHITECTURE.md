@@ -286,7 +286,7 @@ accounts:
   - id: gh-main
     provider: github           # gitlab arrives in M3
     host: https://github.com
-    token: env:GITHUB_TOKEN    # a reference, never the token itself; keychain:… in M3
+    token: env:GITHUB_TOKEN    # a reference, never the token itself: env:NAME or keychain:SERVICE/ACCOUNT
   - id: gl-work
     provider: gitlab
     host: https://gitlab.company.com
@@ -412,7 +412,7 @@ reviewer serve                      # run the engine headless
 
 Published comments aren't mirrored: each one carries its fingerprint in a hidden marker, and `GetOwnCommentsAsync` reads them back from the provider. Hosts and repo names compare case-insensitively. Job folders are pruned after N days; findings stay in the DB.
 
-**Secrets.** Tokens are kept in the OS credential store: macOS Keychain, Windows Credential Manager, libsecret on Linux. Config holds only references. Tokens are never written into job folders, logs or the agent's environment. Git fetches use a credential helper scoped to the engine.
+**Secrets.** Tokens are kept in the OS credential store: macOS Keychain, Windows Credential Manager, libsecret on Linux. Config holds only references. A `keychain:SERVICE/ACCOUNT` reference names a generic password: service and account on macOS (read with `security find-generic-password`) and libsecret (`secret-tool lookup`), target name `SERVICE/ACCOUNT` in Windows Credential Manager (`CredReadW`). The engine only reads; tokens are added with the platform's own tool, which prompts for them, so they never appear in a process's arguments. A missing item is reported with the command that adds it; it never falls back to `gh auth token`. Tokens are never written into job folders, logs or the agent's environment. Git fetches use a credential helper scoped to the engine.
 
 **Security baseline.** Even with user-owned risk, these stay on because they protect the user's own machine:
 
