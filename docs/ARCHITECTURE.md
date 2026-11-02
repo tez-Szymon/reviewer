@@ -65,7 +65,8 @@ public interface IRepositoryProvider
     ProviderCapabilities Capabilities { get; }
     Task<string> GetCurrentUserAsync(CancellationToken ct);
     IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct);
-    IAsyncEnumerable<PullRequestRef> ListCandidatesAsync(RepoRef repo, TriggerFilter filter, CancellationToken ct);
+    Task<PullRequestList> ListOpenPullRequestsAsync(RepoRef repo, string? etag, CancellationToken ct);
+    Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(PullRequestRef pr, CancellationToken ct);
     Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct);
     Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct);
     Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct);
@@ -91,7 +92,7 @@ Where GitHub and GitLab differ, and the adapter absorbs it:
 
 `ProviderCapabilities` exposes flags such as `SupportsRequestChanges`, `SupportsThreadResolve`, `SupportsSuggestions`, `SupportsMergeWhenGreen`. The policy engine checks these instead of assuming.
 
-HTTP: a typed `HttpClient` per provider with Polly retry and rate-limit handling. Octokit.net is optional; it lags the API in places. GitHub polling uses ETag / `If-None-Match`; 304 responses don't count against the rate limit.
+HTTP: a typed `HttpClient` per provider with Polly retry and rate-limit handling. Octokit.net is optional; it lags the API in places. GitHub polling lists a repo's open PRs most recently updated first, sending the first page's ETag as `If-None-Match`; any change to a PR moves it to that page, so a 304 means nothing changed, and 304 responses don't count against the rate limit. The list carries everything the trigger rules read (head, base branch, author, assignees, requested reviewers, labels, draft flag), so polling needs no per-PR requests; `GetChangedFilesAsync` is called only when a review is about to be queued, for the size and path filters.
 
 The token owner can't approve their own PR on either platform. The engine detects `author == token owner` and skips or downgrades to comment-only.
 
@@ -237,14 +238,21 @@ The output `ReviewPlan` lists comments to post, comments to resolve, the decisio
 
 ## Triggers, re-review and delta
 
-The scheduler polls each repo on an interval (default 60 s, with ETags) and creates a job only when trigger rules match and the `(PR, head SHA, config hash)` hasn't been reviewed.
+The scheduler (`Scheduler`, run by `reviewer serve` beside the queue worker) polls each repo under `repos` every `triggers.pollSeconds` (default 60 s, at least 15, with ETags) and creates a job only when trigger rules match and the `(PR, head SHA, config hash)` hasn't been reviewed (a succeeded or skipped job, dry runs included). The ETag is ignored when the repo's trigger settings or the token owner changed since the last poll, since the same list may now trigger differently, and saved only once every PR in the list was handled.
+
+Rules (`TriggerRules`, pure) act on **changes**, not on state: each poll compares a PR with what was seen last time (`SeenPullRequests`), so a PR is queued once per event and one nobody touched is left alone, even when its review failed or was cancelled. A PR is seen only while the filters pass (skip drafts, target branches), so a push to a draft is noticed when it's marked ready. A PR is *followed* once it has a succeeded or skipped review:
+
+- Not followed: queue at once when an initial trigger starts to match, or on a push while one matches (which re-checks a PR the size or path filters turned away, or whose review failed).
+- Followed: the re-review triggers below decide, whether or not an initial trigger still matches; GitHub drops a review request once the review is posted, so `review-requested` alone could never follow a PR. A PR first seen with a head other than its last reviewed one was pushed to while the engine was stopped.
+
+`paths` and `maxDiffLines` (added plus deleted lines of the whole PR) are checked when a review is about to be queued; a PR they turn away is logged.
 
 **Initial review triggers** (per repo, any combination): all PRs, assigned to me, review requested from me, has label, authored by allowlist. Filters: skip drafts, target branches, path globs, max diff size.
 
 **Re-review triggers** (configurable):
 
-- `onNewCommits` with a debounce (default 5 min), so a burst of pushes produces one review.
-- `onReassignment` and `onReviewRequested`.
+- `onNewCommits` with a debounce (default 5 min), so a burst of pushes produces one review: each push moves the queued job's `NotBefore`.
+- `onReassignment` and `onReviewRequested`: the token owner newly among the assignees or requested reviewers. These start at once, ending any debounce.
 - `manual` from the app or CLI.
 
 **Delta strategy** (`DeltaPlanner`). After each *published* review the engine stores, per PR, the reviewed head and base, the patch-ids of the PR's commits, and a per-file hash of the PR's change (changed lines only, whitespace collapsed, so a rebase doesn't change it). It also points `refs/reviewer/pr/<n>/reviewed` at the reviewed head in its local repository, so a force-push can't get that commit pruned. Dry runs store nothing.
@@ -298,7 +306,8 @@ defaults:                      # global policy
     skipDrafts: true
     targetBranches: []         # empty means any
     paths: []                  # only PRs touching these globs; empty means any
-    maxDiffLines: 3000
+    maxDiffLines: 3000         # added + deleted lines of the whole PR
+    pollSeconds: 60            # how often reviewer serve polls the repo; at least 15
   review:
     mode: comment              # comment | approve | gate | gate-merge
     dryRun: false
@@ -376,7 +385,10 @@ reviewer serve                      # run the engine headless
 - `Findings`: every finding the agent reported, in report order, with what the policy did with it (`inline`, `summary`, `already-posted`, `dropped`), whether it blocked, its fingerprint, and the job that resolved it.
 - `PullRequests`: each PR's last *published* review (head, base, job, commit patch-ids, per-file hashes). Dry runs don't move it, since nothing reached the PR.
 
-Added by a later M2 slice: `PollState` (ETags, last seen) for the scheduler. Published comments aren't mirrored: each one carries its fingerprint in a hidden marker, and `GetOwnCommentsAsync` reads them back from the provider. Hosts and repo names compare case-insensitively. Job folders are pruned after N days; findings stay in the DB.
+- `PollStates`: per watched repo, the PR list's ETag, a hash of the trigger settings and token owner it was read with, and when it was last polled.
+- `SeenPullRequests`: each open PR as the scheduler last saw it while the filters passed (head, whether an initial trigger matched, whether the token owner was assigned or requested); closed PRs are forgotten.
+
+Published comments aren't mirrored: each one carries its fingerprint in a hidden marker, and `GetOwnCommentsAsync` reads them back from the provider. Hosts and repo names compare case-insensitively. Job folders are pruned after N days; findings stay in the DB.
 
 **Secrets.** Tokens are kept in the OS credential store: macOS Keychain, Windows Credential Manager, libsecret on Linux. Config holds only references. Tokens are never written into job folders, logs or the agent's environment. Git fetches use a credential helper scoped to the engine.
 

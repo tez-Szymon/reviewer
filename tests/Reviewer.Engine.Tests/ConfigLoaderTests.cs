@@ -223,6 +223,7 @@ public class ConfigLoaderTests
     [InlineData("agents: { default: gpt }", "agents.default: must be one of: claude-code, codex.")]
     [InlineData("defaults: { review: { mode: gate-merge } }", "gate-merge arrives in M3")]
     [InlineData("defaults: { triggers: { initial: [has-label] } }", "has-label needs at least one label")]
+    [InlineData("defaults: { triggers: { pollSeconds: 5 } }", "defaults.triggers.pollSeconds: must be at least 15.")]
     [InlineData("repos: [{ repo: api }]", "repos[0].repo: must be owner/name.")]
     [InlineData("repos: [{ repo: acme/api, account: work }]", "repos[0].account: no account with id 'work'.")]
     [InlineData("repos: [{ repo: acme/api }, { repo: ACME/api }]", "repos[1].repo: ACME/api is listed twice.")]

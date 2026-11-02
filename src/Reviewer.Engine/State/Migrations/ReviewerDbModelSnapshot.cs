@@ -186,6 +186,40 @@ namespace Reviewer.Engine.State.Migrations
                     b.ToTable("Jobs", (string)null);
                 });
 
+            modelBuilder.Entity("Reviewer.Engine.State.PollStateRecord", b =>
+                {
+                    b.Property<long>("Key")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ETag")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<long>("LastPolledAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Repo")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<string>("RulesHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Key");
+
+                    b.HasIndex("Host", "Repo")
+                        .IsUnique();
+
+                    b.ToTable("PollStates", (string)null);
+                });
+
             modelBuilder.Entity("Reviewer.Engine.State.PullRequestRecord", b =>
                 {
                     b.Property<long>("Key")
@@ -234,6 +268,49 @@ namespace Reviewer.Engine.State.Migrations
                         .IsUnique();
 
                     b.ToTable("PullRequests", (string)null);
+                });
+
+            modelBuilder.Entity("Reviewer.Engine.State.SeenPullRequestRecord", b =>
+                {
+                    b.Property<long>("Key")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Assigned")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HeadSha")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<bool>("Matched")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Repo")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<bool>("ReviewRequested")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SeenAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Key");
+
+                    b.HasIndex("Host", "Repo", "Number")
+                        .IsUnique();
+
+                    b.ToTable("SeenPullRequests", (string)null);
                 });
 
             modelBuilder.Entity("Reviewer.Engine.State.FindingRecord", b =>

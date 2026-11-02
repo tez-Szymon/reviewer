@@ -6,7 +6,7 @@ A local-first, per-person AI code reviewer. A .NET engine on your machine polls 
 
 ## Status
 
-M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code. It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is in progress: `~/.reviewer/config.yaml` now sets the review mode (`comment`, `approve`, `gate`), thresholds, skills and accounts, globally and per repo, every review is recorded in a local SQLite database, a re-review covers only what's new since the last one, resolving the threads of findings that were fixed, and `reviewer serve` works a persistent job queue that `reviewer queue add` fills. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
+M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code. It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is in progress: `~/.reviewer/config.yaml` now sets the review mode (`comment`, `approve`, `gate`), thresholds, skills and accounts, globally and per repo, every review is recorded in a local SQLite database, a re-review covers only what's new since the last one, resolving the threads of findings that were fixed, and `reviewer serve` works a persistent job queue that `reviewer queue add` fills, while polling the repos under `repos` (with ETags) and queueing reviews when the trigger rules match. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
 
 | Milestone | Scope | Status |
 |---|---|---|
@@ -43,7 +43,7 @@ reviewer review https://github.com/acme/api/pull/7             # post the review
 reviewer review <url> --full                            # review the whole PR again
 reviewer review <url> --dry-run --min-confidence 0.4           # see what a lower threshold adds
 reviewer queue add <url> [--dry-run] [--full]           # queue a review for the engine
-reviewer serve                                          # run the engine: work the queue until Ctrl+C
+reviewer serve                                          # run the engine: poll repos, work the queue until Ctrl+C
 reviewer queue                                          # queued, running and throttled jobs
 reviewer queue cancel <job-id> | retry <job-id>         # cancel a job, or queue a failed one again
 reviewer history --repo acme/api                        # past reviews, newest first

@@ -19,6 +19,9 @@ public static partial class ConfigLoader
 {
     public const string FileName = "config.yaml";
 
+    /// <summary>The shortest poll interval: a repo's PR list is one request per poll, out of 5,000 an hour on GitHub.</summary>
+    public const int MinPollSeconds = 15;
+
     /// <summary>Keys are camelCase, enum values kebab-case (<c>gate-merge</c>, <c>assigned-to-me</c>).</summary>
     public static JsonSerializerOptions JsonOptions { get; } = new(JsonSerializerDefaults.Web)
     {
@@ -335,6 +338,11 @@ public static partial class ConfigLoader
         if (triggers.MaxDiffLines < 1)
         {
             errors.Add(("triggers.maxDiffLines", "must be at least 1."));
+        }
+
+        if (triggers.PollSeconds < MinPollSeconds)
+        {
+            errors.Add(("triggers.pollSeconds", $"must be at least {MinPollSeconds}."));
         }
 
         var review = policy.Review;

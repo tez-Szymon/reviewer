@@ -8,6 +8,7 @@ internal sealed record LabelDto(string Name);
 internal sealed record BranchDto(string Sha, string Ref);
 
 internal sealed record PullRequestDto(
+    int Number,
     string? Title,
     string? Body,
     BranchDto Head,
@@ -18,6 +19,8 @@ internal sealed record PullRequestDto(
     IReadOnlyList<LabelDto>? Labels,
     bool Draft,
     bool? Mergeable);
+
+internal sealed record PullRequestFileDto(string Filename, int Additions, int Deletions);
 
 internal sealed record CombinedStatusDto(string State, int TotalCount);
 
