@@ -41,12 +41,27 @@ public sealed record ProviderCapabilities(
     bool SupportsSuggestions,
     bool SupportsMergeWhenGreen);
 
-public sealed record TriggerFilter(
-    bool AssignedToMe,
-    bool ReviewRequested,
-    bool SkipDrafts,
+/// <summary>An open PR as the repo's PR list shows it: enough to apply trigger rules without reading each PR.</summary>
+public sealed record PullRequestSummary(
+    PullRequestRef Ref,
+    string HeadSha,
+    string BaseBranch,
+    string Author,
+    IReadOnlyList<string> Assignees,
+    IReadOnlyList<string> RequestedReviewers,
     IReadOnlyList<string> Labels,
-    IReadOnlyList<string> TargetBranches);
+    bool IsDraft);
+
+/// <summary>A repo's open PRs, or word that they haven't changed since the list with the given ETag.</summary>
+/// <param name="ETag">Pass back on the next poll; null when the provider sent none.</param>
+/// <param name="PullRequests">Empty when <paramref name="NotModified"/>.</param>
+public sealed record PullRequestList(bool NotModified, string? ETag, IReadOnlyList<PullRequestSummary> PullRequests)
+{
+    public static PullRequestList Unchanged(string? etag) => new(true, etag, []);
+}
+
+/// <summary>A file the PR changes, with its size in changed lines.</summary>
+public sealed record ChangedFile(string Path, int Additions, int Deletions);
 
 /// <summary>A comment this tool posted earlier, linked to the finding that produced it.</summary>
 /// <param name="IsResolved">Its thread is resolved on the PR, by this tool or by a person.</param>

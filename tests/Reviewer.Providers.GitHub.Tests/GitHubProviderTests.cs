@@ -329,4 +329,57 @@ public class GitHubProviderTests
 
         Assert.Equal(HttpStatusCode.Conflict, error.Status);
     }
+
+    private const string List = "GET repos/acme/api/pulls?state=open&sort=updated&direction=desc&per_page=100";
+
+    private static string ListItem(int number, string head, bool draft = false) => $$"""
+        { "number": {{number}}, "head": { "sha": "{{head}}", "ref": "f" }, "base": { "sha": "b", "ref": "main" },
+          "user": { "login": "alice" }, "assignees": [{ "login": "bob" }], "requested_reviewers": [],
+          "labels": [{ "name": "backend" }], "draft": {{(draft ? "true" : "false")}} }
+        """;
+
+    [Fact]
+    public async Task ListOpenPullRequests_ReadsAllPages_AndKeepsTheFirstPagesETag()
+    {
+        var github = new FakeGitHub()
+            .On(List, $"[{ListItem(7, "h7")}]", nextPage: "repos/acme/api/pulls?page=2", etag: "W/\"first\"")
+            .On("GET repos/acme/api/pulls?page=2", $"[{ListItem(8, "h8", draft: true)}]", etag: "\"second\"");
+
+        var list = await github.Provider().ListOpenPullRequestsAsync(Pr.Repo, null, Ct);
+
+        Assert.False(list.NotModified);
+        Assert.Equal("W/\"first\"", list.ETag);
+        Assert.Equal([7, 8], list.PullRequests.Select(p => p.Ref.Number));
+        var first = list.PullRequests[0];
+        Assert.Equal(("h7", "main", "alice"), (first.HeadSha, first.BaseBranch, first.Author));
+        Assert.Equal(["bob"], first.Assignees);
+        Assert.Equal(["backend"], first.Labels);
+        Assert.True(list.PullRequests[1].IsDraft);
+        Assert.Equal([null, null], github.IfNoneMatch);
+    }
+
+    [Fact]
+    public async Task ListOpenPullRequests_SendsTheETag_AndReportsNotModified()
+    {
+        var github = new FakeGitHub().On(List, "", HttpStatusCode.NotModified);
+
+        var list = await github.Provider().ListOpenPullRequestsAsync(Pr.Repo, "\"abc\"", Ct);
+
+        Assert.True(list.NotModified);
+        Assert.Equal("\"abc\"", list.ETag);
+        Assert.Empty(list.PullRequests);
+        Assert.Equal(["\"abc\""], github.IfNoneMatch);
+    }
+
+    [Fact]
+    public async Task GetChangedFiles_ReadsAllPages()
+    {
+        var github = new FakeGitHub()
+            .On($"GET {Pull}/files?per_page=100", """[{ "filename": "src/a.cs", "additions": 3, "deletions": 1 }]""", nextPage: $"{Pull}/files?page=2")
+            .On($"GET {Pull}/files?page=2", """[{ "filename": "README.md", "additions": 1, "deletions": 0 }]""");
+
+        var files = await github.Provider().GetChangedFilesAsync(Pr, Ct);
+
+        Assert.Equal([new ChangedFile("src/a.cs", 3, 1), new ChangedFile("README.md", 1, 0)], files);
+    }
 }

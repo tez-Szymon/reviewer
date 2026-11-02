@@ -9,7 +9,7 @@ namespace Reviewer.Providers.GitHub;
 
 /// <summary>
 /// GitHub adapter: REST for PRs, reviews and comments; GraphQL for review threads, which REST doesn't expose.
-/// Repo listing and candidate polling come with the scheduler.
+/// Repo listing comes with the desktop app.
 /// </summary>
 public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
 {
@@ -71,8 +71,61 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
     public IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct) =>
         throw new NotImplementedException("Repo browsing comes with M2.");
 
-    public IAsyncEnumerable<PullRequestRef> ListCandidatesAsync(RepoRef repo, TriggerFilter filter, CancellationToken ct) =>
-        throw new NotImplementedException("Polling comes with M2.");
+    public async Task<PullRequestList> ListOpenPullRequestsAsync(RepoRef repo, string? etag, CancellationToken ct)
+    {
+        // Most recently updated first: any change to a PR moves it to the first page, so that page's ETag covers them all.
+        string? next = $"{RepoPath(repo)}/pulls?state=open&sort=updated&direction=desc&per_page=100";
+        string? newETag = null;
+        var result = new List<PullRequestSummary>();
+        for (var first = true; next is not null; first = false)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, next);
+            if (first && etag is not null)
+            {
+                request.Headers.TryAddWithoutValidation("If-None-Match", etag);
+            }
+
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotModified)
+            {
+                return PullRequestList.Unchanged(etag);
+            }
+
+            await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+            if (first)
+            {
+                newETag = response.Headers.ETag?.ToString();
+            }
+
+            foreach (var dto in await ReadAsync<List<PullRequestDto>>(response, ct).ConfigureAwait(false))
+            {
+                result.Add(new PullRequestSummary(
+                    new PullRequestRef(repo, dto.Number),
+                    dto.Head.Sha,
+                    dto.Base.Ref,
+                    dto.User.Login,
+                    [.. (dto.Assignees ?? []).Select(u => u.Login)],
+                    [.. (dto.RequestedReviewers ?? []).Select(u => u.Login)],
+                    [.. (dto.Labels ?? []).Select(l => l.Name)],
+                    dto.Draft));
+            }
+
+            next = NextPage(response);
+        }
+
+        return new PullRequestList(false, newETag, result);
+    }
+
+    public async Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(PullRequestRef pr, CancellationToken ct)
+    {
+        var files = new List<ChangedFile>();
+        await foreach (var file in GetPagesAsync<PullRequestFileDto>($"{PullPath(pr)}/files?per_page=100", ct).ConfigureAwait(false))
+        {
+            files.Add(new ChangedFile(file.Filename, file.Additions, file.Deletions));
+        }
+
+        return files;
+    }
 
     public async Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct)
     {

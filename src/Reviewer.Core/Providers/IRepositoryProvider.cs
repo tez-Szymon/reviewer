@@ -9,7 +9,16 @@ public interface IRepositoryProvider
     Task<string> GetCurrentUserAsync(CancellationToken ct);
 
     IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct);
-    IAsyncEnumerable<PullRequestRef> ListCandidatesAsync(RepoRef repo, TriggerFilter filter, CancellationToken ct);
+
+    /// <summary>
+    /// The repo's open PRs. With <paramref name="etag"/> from the previous list, returns
+    /// <see cref="PullRequestList.NotModified"/> when nothing changed, which costs no rate limit on GitHub.
+    /// </summary>
+    Task<PullRequestList> ListOpenPullRequestsAsync(RepoRef repo, string? etag, CancellationToken ct);
+
+    /// <summary>The files the PR changes, for the scheduler's path and size filters.</summary>
+    Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(PullRequestRef pr, CancellationToken ct);
+
     Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct);
     Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct);
 

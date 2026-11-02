@@ -190,6 +190,54 @@ public sealed class PullRequestRecord
     public ReviewedState ToReviewedState() => new(LastReviewedHead, ReviewedCommitPatchIds, ReviewedFilePatchIds);
 }
 
+/// <summary>What the scheduler last read of a repo's PR list.</summary>
+public sealed class PollStateRecord
+{
+    public long Key { get; set; }
+
+    public required string Host { get; set; }
+
+    public required string Repo { get; set; }
+
+    /// <summary>The PR list's ETag, sent back so an unchanged list costs nothing. Null when there's none to send.</summary>
+    public string? ETag { get; set; }
+
+    /// <summary>
+    /// The trigger settings and token owner the list was read with. When they change, the list is read again in full,
+    /// since the same PRs may now trigger differently.
+    /// </summary>
+    public required string RulesHash { get; set; }
+
+    public DateTimeOffset LastPolledAt { get; set; }
+}
+
+/// <summary>An open PR as the scheduler last saw it while its filters passed, so the next poll can tell what changed.</summary>
+public sealed class SeenPullRequestRecord
+{
+    public long Key { get; set; }
+
+    public required string Host { get; set; }
+
+    public required string Repo { get; set; }
+
+    public int Number { get; set; }
+
+    public required string HeadSha { get; set; }
+
+    /// <summary>An initial trigger matched.</summary>
+    public bool Matched { get; set; }
+
+    /// <summary>The token owner was among the assignees.</summary>
+    public bool Assigned { get; set; }
+
+    /// <summary>A review was requested from the token owner.</summary>
+    public bool ReviewRequested { get; set; }
+
+    public DateTimeOffset SeenAt { get; set; }
+
+    public SeenPullRequest ToSeen() => new(HeadSha, Matched, Assigned, ReviewRequested);
+}
+
 /// <summary>The engine's SQLite database, <c>reviewer.db</c> in the data folder.</summary>
 public sealed class ReviewerDb(DbContextOptions<ReviewerDb> options) : DbContext(options)
 {
@@ -198,6 +246,10 @@ public sealed class ReviewerDb(DbContextOptions<ReviewerDb> options) : DbContext
     public DbSet<FindingRecord> Findings => Set<FindingRecord>();
 
     public DbSet<PullRequestRecord> PullRequests => Set<PullRequestRecord>();
+
+    public DbSet<PollStateRecord> PollStates => Set<PollStateRecord>();
+
+    public DbSet<SeenPullRequestRecord> SeenPullRequests => Set<SeenPullRequestRecord>();
 
     /// <remarks>
     /// No connection pooling: an idle pooled connection keeps the file open, which on Windows blocks deleting or moving
@@ -251,6 +303,24 @@ public sealed class ReviewerDb(DbContextOptions<ReviewerDb> options) : DbContext
                     (a, b) => a!.Count == b!.Count && !a.Except(b).Any(),
                     v => v.Aggregate(0, (hash, pair) => hash ^ HashCode.Combine(pair.Key, pair.Value)),
                     v => new Dictionary<string, string>(v)));
+        });
+
+        modelBuilder.Entity<PollStateRecord>(poll =>
+        {
+            poll.ToTable("PollStates");
+            poll.Property(p => p.Host).UseCollation("NOCASE");
+            poll.Property(p => p.Repo).UseCollation("NOCASE");
+            poll.HasKey(p => p.Key);
+            poll.HasIndex(p => new { p.Host, p.Repo }).IsUnique();
+        });
+
+        modelBuilder.Entity<SeenPullRequestRecord>(seen =>
+        {
+            seen.ToTable("SeenPullRequests");
+            seen.Property(p => p.Host).UseCollation("NOCASE");
+            seen.Property(p => p.Repo).UseCollation("NOCASE");
+            seen.HasKey(p => p.Key);
+            seen.HasIndex(p => new { p.Host, p.Repo, p.Number }).IsUnique();
         });
     }
 

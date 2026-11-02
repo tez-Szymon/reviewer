@@ -359,7 +359,7 @@ queue.SetAction(async (_, ct) =>
     }
 });
 
-var serve = new Command("serve", "Run the engine: review queued jobs until stopped with Ctrl+C");
+var serve = new Command("serve", "Run the engine: poll the configured repos and review queued jobs until stopped with Ctrl+C");
 serve.SetAction(async (_, ct) =>
 {
     if (await LoadConfigAsync(paths, ct) is not { } config)
@@ -385,8 +385,10 @@ serve.SetAction(async (_, ct) =>
             var store = await ReviewStore.OpenAsync(paths.Database, TimeProvider.System, ct);
             using var worker = new QueueWorker(
                 store, new QueueLauncher(paths, new ReviewFactory(paths, runner, store, home), config, Log), TimeProvider.System, Log);
-            Log($"Engine started on {paths.Root}; Ctrl+C stops it.");
-            await worker.RunAsync(ct);
+            using var source = new PollSource(paths, runner);
+            var scheduler = new Scheduler(store, source, TimeProvider.System, worker.Wake, Log);
+            Log($"Engine started on {paths.Root}, watching {config.Repos.Count} repo(s); Ctrl+C stops it.");
+            await Task.WhenAll(worker.RunAsync(ct), scheduler.RunAsync(ct));
             Log("Engine stopped.");
             return 0;
         }

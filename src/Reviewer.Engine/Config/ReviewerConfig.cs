@@ -46,6 +46,13 @@ public sealed record ReviewerConfig(
         return new EffectiveConfig(account, agentId, agent, policy, ConfigLoader.Hash(agentId, agent, policy));
     }
 
+    /// <summary>The repos with an entry, which <c>reviewer serve</c> polls; each on its account's host.</summary>
+    public IEnumerable<RepoRef> WatchedRepos() => Repos.Select(r =>
+    {
+        var parts = r.Repo.Split('/'); // Validated as owner/name.
+        return new RepoRef(Account(r.Account).Host, parts[0], parts[1]);
+    });
+
     // Validation guarantees that a named account exists and that an unnamed one is unambiguous.
     private AccountConfig Account(string? id) => id is null ? Accounts[0] : Accounts.First(a => a.Id == id);
 
@@ -112,6 +119,8 @@ public sealed record PolicyConfig(
 /// <param name="Authors">For <see cref="InitialTrigger.AuthoredBy"/>.</param>
 /// <param name="TargetBranches">Only PRs into these branches; empty means any.</param>
 /// <param name="Paths">Only PRs touching a file matching one of these globs; empty means any.</param>
+/// <param name="MaxDiffLines">Skip PRs that add and delete more lines than this in all.</param>
+/// <param name="PollSeconds">How often <c>reviewer serve</c> looks for changes to the repo's PRs.</param>
 public sealed record TriggerConfig(
     IReadOnlyList<InitialTrigger> Initial,
     IReadOnlyList<string> Labels,
@@ -120,7 +129,12 @@ public sealed record TriggerConfig(
     bool SkipDrafts,
     IReadOnlyList<string> TargetBranches,
     IReadOnlyList<string> Paths,
-    int MaxDiffLines);
+    int MaxDiffLines,
+    int PollSeconds)
+{
+    [JsonIgnore]
+    public TimeSpan PollInterval => TimeSpan.FromSeconds(PollSeconds);
+}
 
 public enum InitialTrigger
 {

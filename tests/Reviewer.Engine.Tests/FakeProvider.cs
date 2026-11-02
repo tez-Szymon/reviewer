@@ -48,8 +48,32 @@ internal sealed class FakeProvider(PullRequestSnapshot snapshot) : IRepositoryPr
 
     public IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct) => throw new NotSupportedException();
 
-    public IAsyncEnumerable<PullRequestRef> ListCandidatesAsync(RepoRef repo, TriggerFilter filter, CancellationToken ct) =>
-        throw new NotSupportedException();
+    /// <summary>The open PRs <see cref="ListOpenPullRequestsAsync"/> lists, under <see cref="ListETag"/>.</summary>
+    public List<PullRequestSummary> Open { get; } = [];
+
+    public string ListETag { get; set; } = "\"1\"";
+
+    /// <summary>The ETag each list request was sent with.</summary>
+    public List<string?> ListRequests { get; } = [];
+
+    /// <summary>Thrown by <see cref="ListOpenPullRequestsAsync"/>, to test a failed poll.</summary>
+    public Exception? ListError { get; set; }
+
+    public Dictionary<int, IReadOnlyList<ChangedFile>> ChangedFiles { get; } = [];
+
+    public Task<PullRequestList> ListOpenPullRequestsAsync(RepoRef repo, string? etag, CancellationToken ct)
+    {
+        ListRequests.Add(etag);
+        if (ListError is { } error)
+        {
+            throw error;
+        }
+
+        return Task.FromResult(etag == ListETag ? PullRequestList.Unchanged(etag) : new PullRequestList(false, ListETag, [.. Open]));
+    }
+
+    public Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(PullRequestRef pr, CancellationToken ct) =>
+        Task.FromResult(ChangedFiles.GetValueOrDefault(pr.Number) ?? [new ChangedFile("src/a.cs", 10, 2)]);
 
 
     public Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct) => throw new NotSupportedException();
