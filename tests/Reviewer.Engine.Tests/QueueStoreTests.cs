@@ -208,4 +208,52 @@ public sealed class QueueStoreTests : IDisposable
         Assert.Contains("stopped before it finished", dead.Error, StringComparison.Ordinal);
         Assert.Equal(JobState.Running, (await GetAsync(store, "alive")).State);
     }
+
+    [Fact]
+    public async Task Version_GrowsWithEveryChange_AndListsEachJobOnceInItsLatestState()
+    {
+        var store = await OpenAsync();
+        Assert.Equal(0, await store.GetLatestVersionAsync(Ct));
+
+        await store.EnqueueAsync(Job("j1"), Ct);
+        await store.EnqueueAsync(Job("j2", repo: "acme/web"), Ct);
+        var queued = await store.GetLatestVersionAsync(Ct);
+        await store.TryClaimJobAsync("j1", Ct);
+        await store.FailJobAsync("j1", JobState.Failed, "boom", null, Ct);
+
+        var changes = await store.ListJobChangesAsync(0, 10, Ct);
+        Assert.Equal(["j2", "j1"], changes.Select(j => j.Id));
+        Assert.Equal(JobState.Failed, changes[1].State);
+        Assert.True(changes[0].Version < changes[1].Version);
+        Assert.Equal(changes[1].Version, await store.GetLatestVersionAsync(Ct));
+        Assert.Equal(["j1"], (await store.ListJobChangesAsync(queued, 10, Ct)).Select(j => j.Id));
+    }
+
+    [Fact]
+    public async Task Version_SeesChangesFromAnotherStoreOnTheSameFile()
+    {
+        var engine = await OpenAsync();
+        var cli = await OpenAsync();
+        var start = await engine.GetLatestVersionAsync(Ct);
+
+        await cli.EnqueueAsync(Job("j1"), Ct);
+        await cli.CancelJobAsync("j1", Ct);
+
+        var change = Assert.Single(await engine.ListJobChangesAsync(start, 10, Ct));
+        Assert.Equal(JobState.Cancelled, change.State);
+    }
+
+    [Fact]
+    public async Task Version_BumpsOnTrackedUpdates()
+    {
+        var store = await OpenAsync();
+        await store.EnqueueAsync(Job("j1"), Ct);
+        var before = await store.GetLatestVersionAsync(Ct);
+
+        // Merging a second request updates the queued row through EF's change tracker, not ExecuteUpdate.
+        await store.EnqueueAsync(Job("j2", full: true), Ct);
+
+        var change = Assert.Single(await store.ListJobChangesAsync(before, 10, Ct));
+        Assert.True(change.Full);
+    }
 }

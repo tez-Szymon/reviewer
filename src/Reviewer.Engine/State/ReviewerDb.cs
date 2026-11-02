@@ -98,6 +98,12 @@ public sealed class JobRecord
     /// <summary>The latest attempt's folder, with the agent's inputs, output and <c>plan.json</c>.</summary>
     public string? AttemptFolder { get; set; }
 
+    /// <summary>
+    /// Bumped by a database trigger on every insert and update, past every other job's, by any process: the order of
+    /// changes the local API streams as events. Never written by code.
+    /// </summary>
+    public long Version { get; set; }
+
     public ICollection<FindingRecord> Findings { get; } = new List<FindingRecord>();
 }
 
@@ -272,13 +278,19 @@ public sealed class ReviewerDb(DbContextOptions<ReviewerDb> options) : DbContext
     {
         modelBuilder.Entity<JobRecord>(job =>
         {
-            job.ToTable("Jobs");
+            job.ToTable("Jobs", table =>
+            {
+                // Declared so EF doesn't read generated values back with RETURNING, which runs before triggers.
+                table.HasTrigger(JobVersionTriggers.Insert);
+                table.HasTrigger(JobVersionTriggers.Update);
+            });
             // Hosts and repo names are case-insensitive on both providers, so one PR has one history.
             job.Property(j => j.Host).UseCollation("NOCASE");
             job.Property(j => j.Repo).UseCollation("NOCASE");
             job.HasIndex(j => new { j.Host, j.Repo, j.Number });
             job.HasIndex(j => j.CreatedAt);
             job.HasIndex(j => j.State);
+            job.HasIndex(j => j.Version);
             job.HasMany(j => j.Findings).WithOne().HasForeignKey(f => f.JobId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -327,6 +339,31 @@ public sealed class ReviewerDb(DbContextOptions<ReviewerDb> options) : DbContext
     private sealed class UnixMillisecondsConverter() : ValueConverter<DateTimeOffset, long>(
         v => v.ToUnixTimeMilliseconds(),
         v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+}
+
+/// <summary>
+/// The triggers that keep <see cref="JobRecord.Version"/>. SQLite runs one write at a time, so <c>MAX + 1</c> under the
+/// write lock gives each change a unique number, and changes commit in that order: a reader that has seen version
+/// <c>n</c> misses nothing by asking for versions after it.
+/// </summary>
+internal static class JobVersionTriggers
+{
+    public const string Insert = "Jobs_Version_Insert";
+    public const string Update = "Jobs_Version_Update";
+
+    public const string CreateSql = $"""
+        CREATE TRIGGER "{Insert}" AFTER INSERT ON "Jobs" BEGIN
+            UPDATE "Jobs" SET "Version" = (SELECT COALESCE(MAX("Version"), 0) + 1 FROM "Jobs") WHERE "Id" = NEW."Id";
+        END;
+        CREATE TRIGGER "{Update}" AFTER UPDATE ON "Jobs" WHEN NEW."Version" = OLD."Version" BEGIN
+            UPDATE "Jobs" SET "Version" = (SELECT MAX("Version") + 1 FROM "Jobs") WHERE "Id" = NEW."Id";
+        END;
+        """;
+
+    public const string DropSql = $"""
+        DROP TRIGGER IF EXISTS "{Insert}";
+        DROP TRIGGER IF EXISTS "{Update}";
+        """;
 }
 
 /// <summary>Lets <c>dotnet ef migrations add</c> build the model without the engine running.</summary>

@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Reviewer.Api\Reviewer.Api.csproj" />
     <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
     <ProjectReference Include="..\Reviewer.Engine\Reviewer.Engine.csproj" />
     <ProjectReference Include="..\Reviewer.Git\Reviewer.Git.csproj" />

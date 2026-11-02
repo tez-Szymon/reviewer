@@ -235,7 +235,8 @@ public sealed partial class ReviewStore
 
     /// <summary>Most recent jobs first.</summary>
     /// <param name="repo"><c>owner/name</c> to list one repo only.</param>
-    public async Task<IReadOnlyList<JobSummary>> ListJobsAsync(string? repo, int limit, CancellationToken ct)
+    /// <param name="number">With <paramref name="repo"/>, one PR only.</param>
+    public async Task<IReadOnlyList<JobSummary>> ListJobsAsync(string? repo, int limit, CancellationToken ct, int? number = null)
     {
         await using var db = new ReviewerDb(_options);
         var query = db.Jobs.AsNoTracking();
@@ -244,12 +245,34 @@ public sealed partial class ReviewStore
             query = query.Where(j => j.Repo == repo);
         }
 
+        if (number is not null)
+        {
+            query = query.Where(j => j.Number == number);
+        }
+
         return await query.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id).Take(limit)
             .Select(j => new JobSummary(
                 j,
                 j.Findings.Count(f => f.Disposition == FindingDisposition.Inline),
                 j.Findings.Count(f => f.Disposition == FindingDisposition.Summary),
                 j.Findings.Count(f => f.Blocking)))
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The highest <see cref="JobRecord.Version"/>: where a feed of changes from now on starts.</summary>
+    public async Task<long> GetLatestVersionAsync(CancellationToken ct)
+    {
+        await using var db = new ReviewerDb(_options);
+        return await db.Jobs.MaxAsync(j => (long?)j.Version, ct).ConfigureAwait(false) ?? 0;
+    }
+
+    /// <summary>
+    /// Jobs changed after <paramref name="afterVersion"/>, in the order they changed, each once in its latest state.
+    /// </summary>
+    public async Task<IReadOnlyList<JobRecord>> ListJobChangesAsync(long afterVersion, int limit, CancellationToken ct)
+    {
+        await using var db = new ReviewerDb(_options);
+        return await db.Jobs.AsNoTracking().Where(j => j.Version > afterVersion).OrderBy(j => j.Version).Take(limit)
             .ToListAsync(ct).ConfigureAwait(false);
     }
 

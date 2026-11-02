@@ -20,6 +20,9 @@ public sealed record ReviewerPaths(string Root)
     /// <summary>Held by <c>reviewer serve</c> while it runs, so only one engine works the queue.</summary>
     public string EngineLock => Path.Combine(Root, "engine.lock");
 
+    /// <summary>The Unix domain socket the engine's local API listens on while <c>reviewer serve</c> runs.</summary>
+    public string Socket => Path.Combine(Root, "engine.sock");
+
     /// <summary>Per-job folders: worktree plus numbered attempt folders.</summary>
     public string Jobs => Path.Combine(Root, "jobs");
 
