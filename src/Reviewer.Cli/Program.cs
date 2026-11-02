@@ -169,7 +169,17 @@ status.SetAction(async (_, ct) =>
 
     var account = (config ?? ReviewerConfig.Default).Accounts[0];
     var github = "github.com: " + GitHubToken.Missing(account);
-    if (await GitHubToken.ResolveAsync(runner, account, ct) is { } token)
+    string? token = null;
+    try
+    {
+        token = await GitHubToken.ResolveAsync(runner, account, ct);
+    }
+    catch (KeychainException e)
+    {
+        github = "github.com: " + e.Message;
+    }
+
+    if (token is not null)
     {
         using var http = GitHubProvider.CreateHttpClient(token);
         try

@@ -251,11 +251,11 @@ public static partial class ConfigLoader
             }
 
             // Never echo the value: if it's a pasted token, the error message must not spread it further.
-            if (account.Token is { } token && !EnvReference().IsMatch(token))
+            if (account.Token is { } token && !TokenReference.TryParse(token, out _))
             {
-                errors.Add($"{path}.token", token.StartsWith("keychain:", StringComparison.Ordinal)
-                    ? "keychain references arrive in M3; use env:NAME for now."
-                    : "must be a reference such as env:GITHUB_TOKEN, never the token itself.");
+                errors.Add($"{path}.token", token.StartsWith(TokenReference.KeychainPrefix, StringComparison.Ordinal)
+                    ? "must be keychain:SERVICE/ACCOUNT, such as keychain:reviewer/gh-main."
+                    : "must be a reference such as env:GITHUB_TOKEN or keychain:reviewer/gh-main, never the token itself.");
             }
         }
     }
@@ -383,9 +383,6 @@ public static partial class ConfigLoader
 
     [GeneratedRegex(@"missing required properties including: (.*)\.")]
     private static partial Regex MissingKeys();
-
-    [GeneratedRegex("^env:[A-Za-z_][A-Za-z0-9_]*$")]
-    private static partial Regex EnvReference();
 
     [GeneratedRegex(@"^[^/\s]+/[^/\s]+$")]
     private static partial Regex RepoName();

@@ -210,8 +210,27 @@ public class ConfigLoaderTests
     {
         var error = Error("accounts: [{ id: gh, provider: github, token: ghp_secret123 }]");
 
-        Assert.Contains("accounts[0].token: must be a reference such as env:GITHUB_TOKEN", error, StringComparison.Ordinal);
+        Assert.Contains("accounts[0].token: must be a reference such as env:GITHUB_TOKEN or keychain:reviewer/gh-main", error, StringComparison.Ordinal);
         Assert.DoesNotContain("ghp_secret123", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_KeychainToken_IsAccepted()
+    {
+        var config = ConfigLoader.Parse("accounts: [{ id: gh, token: keychain:reviewer/gh-main }]");
+
+        Assert.Equal("keychain:reviewer/gh-main", Assert.Single(config.Accounts).Token);
+    }
+
+    [Theory]
+    [InlineData("keychain:gh-main")]
+    [InlineData("keychain:reviewer/gh/main")]
+    [InlineData("keychain:reviewer/")]
+    public void Parse_MalformedKeychainToken_SaysWhatShapeItNeeds(string token)
+    {
+        Assert.Equal(
+            "config.yaml:1: accounts[0].token: must be keychain:SERVICE/ACCOUNT, such as keychain:reviewer/gh-main.",
+            Error($"accounts: [{{ id: gh, token: '{token}' }}]"));
     }
 
     [Theory]

@@ -6,13 +6,13 @@ A local-first, per-person AI code reviewer. A .NET engine on your machine polls 
 
 ## Status
 
-M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code. It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is in progress: `~/.reviewer/config.yaml` now sets the review mode (`comment`, `approve`, `gate`), thresholds, skills and accounts, globally and per repo, every review is recorded in a local SQLite database, a re-review covers only what's new since the last one, resolving the threads of findings that were fixed, and `reviewer serve` works a persistent job queue that `reviewer queue add` fills, while polling the repos under `repos` (with ETags) and queueing reviews when the trigger rules match. While it runs, the engine serves a local API on a Unix socket (`~/.reviewer/engine.sock`) with jobs, PRs, config and agent health, and streams job changes as Server-Sent Events; `reviewer watch` prints them. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
+M1 is done: `reviewer review <url>` runs the whole loop for one GitHub PR with Claude Code. It was tried on 14 real PRs across 5 repositories, public and private, and found a real bug that earlier human and bot reviews had missed. M2 is in progress: `~/.reviewer/config.yaml` now sets the review mode (`comment`, `approve`, `gate`), thresholds, skills and accounts, globally and per repo, every review is recorded in a local SQLite database, a re-review covers only what's new since the last one, resolving the threads of findings that were fixed, and `reviewer serve` works a persistent job queue that `reviewer queue add` fills, while polling the repos under `repos` (with ETags) and queueing reviews when the trigger rules match. While it runs, the engine serves a local API on a Unix socket (`~/.reviewer/engine.sock`) with jobs, PRs, config and agent health, and streams job changes as Server-Sent Events; `reviewer watch` prints them. M3 has started: account tokens can be read from the OS keychain (`keychain:SERVICE/ACCOUNT`). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture and the MVP milestones.
 
 | Milestone | Scope | Status |
 |---|---|---|
 | M1 · Core review loop | GitHub adapter, worktrees, Claude Code, findings schema, policy engine, `reviewer review <url>` | Done |
 | M2 · Engine, automation | Config, polling, triggers, job queue, SQLite state, delta review, local API | Built; exit criterion (a week unattended) pending |
-| M3 · Desktop and GitLab | Avalonia app, GitLab (incl. self-hosted), Codex, OS keychain, `gate-merge` | |
+| M3 · Desktop and GitLab | Avalonia app, GitLab (incl. self-hosted), Codex, OS keychain, `gate-merge` | In progress: OS keychain built |
 | M4 · API agents, release | `Microsoft.Extensions.AI` agents, signed installers, auto-update, eval set | |
 
 ## Build
@@ -34,7 +34,13 @@ dotnet ef migrations add <Name> --project src/Reviewer.Engine --startup-project 
 
 ## Usage
 
-Needs Claude Code logged in (`claude auth login`) and a GitHub token from `GITHUB_TOKEN` or `gh auth login`.
+Needs Claude Code logged in (`claude auth login`) and a GitHub token from `GITHUB_TOKEN` or `gh auth login`. An account in `config.yaml` can instead point at the OS keychain with `token: keychain:reviewer/gh-main`; add the item with the platform's own tool, which prompts for the token:
+
+```bash
+security add-generic-password -s reviewer -a gh-main -U -w               # macOS Keychain
+cmdkey /generic:reviewer/gh-main /user:gh-main /pass                     # Windows Credential Manager
+secret-tool store --label=reviewer/gh-main service reviewer account gh-main   # Linux (libsecret)
+```
 
 ```bash
 reviewer status                                         # agent and GitHub account
