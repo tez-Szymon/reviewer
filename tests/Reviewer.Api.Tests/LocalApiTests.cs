@@ -137,6 +137,20 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
         Assert.Equal(("https://git.acme.test", "acme/platform/api", 12), (job.Host, job.Repo, job.Number));
     }
 
+    [Theory]
+    [InlineData("codex", HttpStatusCode.Created)]
+    [InlineData("gemini", HttpStatusCode.BadRequest)]
+    public async Task QueueReview_WithAnotherAgent_QueuesItIfKnown(string agent, HttpStatusCode expected)
+    {
+        using var response = await PostAsync("jobs", new QueueRequest(PrUrl, Agent: agent));
+
+        Assert.Equal(expected, response.StatusCode);
+        if (expected == HttpStatusCode.Created)
+        {
+            Assert.Equal(agent, Assert.Single((await Http.GetFromJsonAsync<List<JobDto>>("queue", ApiJson.Options, Ct))!).AgentId);
+        }
+    }
+
     [Fact]
     public async Task QueueReview_WithAnInvalidConfig_ListsItsErrors()
     {

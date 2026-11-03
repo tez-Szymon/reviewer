@@ -22,6 +22,25 @@ internal sealed class FakeRunner : IProcessRunner
         .On("--help", "  --restricted  ...\n  --json-schema <schema>\n  --strict-mcp-config\n  --tools <tools...>\n")
         .On("auth", """{ "loggedIn": true, "authMethod": "claude.ai" }""");
 
+    /// <summary>A healthy Codex CLI: version, exec help with the required flags, logged in.</summary>
+    public FakeRunner HealthyCodex() => this
+        .On("--version", "codex-cli 0.162.1\n")
+        .On("exec", "  --output-schema <FILE>\n  --output-last-message <FILE>\n  --ignore-user-config\n  --ignore-rules\n  --ephemeral\n  --json\n")
+        .On("login", "Logged in using ChatGPT\n");
+
+    /// <summary>A <c>codex exec</c> run: writes <paramref name="lastMessage"/> where the CLI was told to, prints events.</summary>
+    public FakeRunner OnCodexExec(string? lastMessage, string events = "", int exitCode = 0, string stderr = "") =>
+        On("exec", async (spec, ct) =>
+        {
+            if (lastMessage is not null)
+            {
+                var file = spec.Arguments[spec.Arguments.ToList().IndexOf("--output-last-message") + 1];
+                await File.WriteAllTextAsync(file, lastMessage, ct);
+            }
+
+            return new ProcessResult(exitCode, events, stderr);
+        });
+
     public Task<ProcessResult> RunAsync(ProcessSpec spec, CancellationToken ct)
     {
         Calls.Add(spec);

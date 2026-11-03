@@ -1,5 +1,6 @@
 using System.Globalization;
 using Reviewer.Agents.Cli;
+using Reviewer.Core.Agents;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
 using Reviewer.Engine.Config;
@@ -8,7 +9,7 @@ using Reviewer.Git;
 
 namespace Reviewer.Cli;
 
-/// <summary>A review can't be set up: an agent that isn't available yet, or no token.</summary>
+/// <summary>A review can't be set up: an unknown agent, or no token.</summary>
 internal sealed class ReviewSetupException(string message) : Exception(message);
 
 /// <summary>A runner and request for one PR. Disposing it releases the account's connection.</summary>
@@ -28,11 +29,6 @@ internal sealed class ReviewFactory(ReviewerPaths paths, IProcessRunner processe
     /// <exception cref="ReviewSetupException">The review can't run with this config.</exception>
     public async Task<PreparedRun> CreateAsync(PullRequestRef pr, EffectiveConfig effective, bool dryRun, bool full, CancellationToken ct)
     {
-        if (effective.AgentId != AgentsConfig.ClaudeCodeId)
-        {
-            throw new ReviewSetupException($"Agent '{effective.AgentId}' is not available yet; use claude-code.");
-        }
-
         AccountConnection connection;
         try
         {
@@ -49,7 +45,7 @@ internal sealed class ReviewFactory(ReviewerPaths paths, IProcessRunner processe
             var runner = new ReviewRunner(
                 connection.Provider,
                 new ReviewContextBuilder(git, paths, TimeProvider.System),
-                new ClaudeCodeAgent(new ClaudeCodeOptions(Model: effective.Agent.Model), processes),
+                Agent(effective.AgentId, effective.Agent.Model, processes),
                 store);
             var policy = effective.Policy.ToReviewPolicy();
             var request = new ReviewRequest(
@@ -68,6 +64,14 @@ internal sealed class ReviewFactory(ReviewerPaths paths, IProcessRunner processe
             throw;
         }
     }
+
+    /// <summary>The CLI agent for a configured agent id.</summary>
+    public static IReviewAgent Agent(string id, string? model, IProcessRunner processes) => id switch
+    {
+        AgentsConfig.ClaudeCodeId => new ClaudeCodeAgent(new ClaudeCodeOptions(Model: model), processes),
+        AgentsConfig.CodexId => new CodexAgent(new CodexOptions(Model: model), processes),
+        _ => throw new ReviewSetupException($"Unknown agent '{id}'."),
+    };
 }
 
 /// <summary>

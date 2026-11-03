@@ -16,12 +16,24 @@ public class AgentEnvironmentTests
     [InlineData("GIT_ASKPASS", true)]
     [InlineData("ANTHROPIC_API_KEY", false)]
     [InlineData("CLAUDE_CODE_OAUTH_TOKEN", false)]
+    [InlineData("CODEX_ACCESS_TOKEN", true)]
     [InlineData("PATH", false)]
     [InlineData("HOME", false)]
     [InlineData("KEYBOARD_LAYOUT", false)]
     public void IsSecret_MatchesCredentialNames(string name, bool secret)
     {
-        Assert.Equal(secret, AgentEnvironment.IsSecret(name));
+        Assert.Equal(secret, AgentEnvironment.IsSecret(name, AgentEnvironment.ClaudeAuth));
+    }
+
+    [Theory]
+    [InlineData("OPENAI_API_KEY", false)]
+    [InlineData("CODEX_ACCESS_TOKEN", false)]
+    [InlineData("ANTHROPIC_API_KEY", true)]
+    [InlineData("CLAUDE_CODE_OAUTH_TOKEN", true)]
+    [InlineData("GITHUB_TOKEN", true)]
+    public void IsSecret_KeepsOnlyCodexOwnAuth_ForCodex(string name, bool secret)
+    {
+        Assert.Equal(secret, AgentEnvironment.IsSecret(name, AgentEnvironment.CodexAuth));
     }
 
     [Fact]
@@ -29,7 +41,7 @@ public class AgentEnvironmentTests
     {
         var current = new Hashtable { ["PATH"] = "/bin", ["GH_TOKEN"] = "x" };
 
-        var env = AgentEnvironment.Scrubbed(current, new Dictionary<string, string?> { ["LC_ALL"] = "C" });
+        var env = AgentEnvironment.Scrubbed(current, new Dictionary<string, string?> { ["LC_ALL"] = "C" }, AgentEnvironment.ClaudeAuth);
 
         Assert.Equal(new Dictionary<string, string?> { ["GH_TOKEN"] = null, ["LC_ALL"] = "C" }, env);
     }
