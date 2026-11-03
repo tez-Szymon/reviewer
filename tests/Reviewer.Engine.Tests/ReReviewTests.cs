@@ -201,6 +201,30 @@ public sealed class ReReviewTests : IDisposable
     }
 
     [Fact]
+    public async Task DismissedBlocker_ReportedAgain_AfterTheDismissalWasRecorded_StillDoesNotBlock()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        _provider.ResolvedThreads.Add("c0");
+        Edit(9, "unrelated");
+        _source.Commit("unrelated change");
+        _agent.Reports.Enqueue(new FindingsReport("fine", []));
+        var second = await ReviewAsync(); // Records the dismissal, so the finding is no longer open.
+        _agent.Reports.Enqueue(new FindingsReport("still a bug", [Bug with { Id = "again" }]));
+
+        var third = await ReviewAsync(full: true);
+
+        Assert.Equal(1, second.Dismissed);
+        Assert.Equal(ReviewDecision.Approve, third.Plan.Decision);
+        Assert.Equal((0, 0, 0), (third.Dismissed, third.StillOpen, third.Resolved));
+        Assert.Empty(_provider.Published[2].Comments);
+        Assert.DoesNotContain("dismissed on the PR", _provider.Published[2].Summary, StringComparison.Ordinal);
+        Assert.Contains(third.Plan.Reasons, r => r.StartsWith("Ignored 1 finding(s) whose thread a person resolved", StringComparison.Ordinal));
+        Assert.Equal(FindingDisposition.Dropped, Assert.Single((await _store.GetJobAsync(third.JobId, Ct))!.Findings).Disposition);
+        Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));
+    }
+
+    [Fact]
     public async Task ResolveFailure_IsAWarning_TheReviewAndTheFixStillCount()
     {
         _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
