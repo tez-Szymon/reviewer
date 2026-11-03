@@ -116,6 +116,24 @@ public class GitHubProviderTests
         Assert.Equal(CiState.Failure, (await github.Provider().GetSnapshotAsync(Pr, Ct)).Ci);
     }
 
+    [Theory]
+    [InlineData(null, "user/repos?per_page=100&sort=full_name")]
+    [InlineData("Reviewer-Bot", "user/repos?affiliation=owner&per_page=100&sort=full_name")]
+    [InlineData("acme", "orgs/acme/repos?per_page=100&sort=full_name")]
+    [InlineData("alice", "users/alice/repos?per_page=100&sort=full_name")]
+    public async Task ListRepos_ReadsTheOwnersList(string? owner, string path)
+    {
+        var github = new FakeGitHub()
+            .On("GET user", """{ "login": "reviewer-bot" }""")
+            .On("GET orgs/acme", """{ "login": "acme" }""")
+            .On("GET orgs/alice", """{ "message": "Not Found" }""", HttpStatusCode.NotFound)
+            .On($"GET {path}", """[{ "full_name": "acme/api" }, { "full_name": "acme/web" }]""");
+
+        var repos = await github.Provider().ListAccessibleReposAsync(owner, Ct).ToListAsync(Ct);
+
+        Assert.Equal([new RepoRef(GitHubUrls.GitHubCom, "acme", "api"), new RepoRef(GitHubUrls.GitHubCom, "acme", "web")], repos);
+    }
+
     [Fact]
     public async Task GetCurrentUser_IsCached()
     {

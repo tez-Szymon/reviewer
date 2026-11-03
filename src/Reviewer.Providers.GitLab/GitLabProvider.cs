@@ -47,8 +47,40 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
 
     public async Task<string> GetCurrentUserAsync(CancellationToken ct) => (await CurrentUserAsync(ct).ConfigureAwait(false)).Username;
 
-    public IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct) =>
-        throw new NotImplementedException("Repo browsing comes with the desktop app.");
+    /// <summary>
+    /// The projects the token's user is a member of, or one owner's: a group's, its subgroups' included, or a user's.
+    /// Sorted by path.
+    /// </summary>
+    public async IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, [EnumeratorCancellation] CancellationToken ct)
+    {
+        const string Query = "simple=true&order_by=path&sort=asc&per_page=100";
+        var path = owner is null ? $"projects?membership=true&{Query}"
+            : await IsGroupAsync(owner, ct).ConfigureAwait(false)
+                ? $"groups/{Uri.EscapeDataString(owner)}/projects?include_subgroups=true&{Query}"
+                : $"users/{Uri.EscapeDataString(owner)}/projects?{Query}";
+
+        // The instance's URL, path included: the API lives at <host>/api/v4/.
+        var host = new Uri(_http.BaseAddress!, "../..");
+        await foreach (var project in GetPagesAsync<ProjectDto>(path, ct).ConfigureAwait(false))
+        {
+            if (RepoRef.TryParse(host, project.PathWithNamespace, out var parsed))
+            {
+                yield return parsed;
+            }
+        }
+    }
+
+    private async Task<bool> IsGroupAsync(string owner, CancellationToken ct)
+    {
+        using var response = await _http.GetAsync($"groups/{Uri.EscapeDataString(owner)}?with_projects=false", ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+        return true;
+    }
 
     public async Task<PullRequestList> ListOpenPullRequestsAsync(RepoRef repo, string? etag, CancellationToken ct)
     {
@@ -86,7 +118,8 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
                     Usernames(dto.Assignees),
                     Usernames(dto.Reviewers),
                     dto.Labels ?? [],
-                    dto.Draft));
+                    dto.Draft,
+                    dto.Title ?? ""));
             }
 
             next = NextPage(response);

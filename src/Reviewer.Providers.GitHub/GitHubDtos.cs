@@ -21,6 +21,8 @@ internal sealed record PullRequestDto(
     bool Draft,
     bool? Mergeable);
 
+internal sealed record RepoDto(string FullName);
+
 internal sealed record PullRequestFileDto(string Filename, int Additions, int Deletions);
 
 internal sealed record CombinedStatusDto(string State, int TotalCount);

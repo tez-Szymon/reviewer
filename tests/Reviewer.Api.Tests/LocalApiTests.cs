@@ -5,7 +5,9 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Reviewer.Core.Agents;
 using Reviewer.Core.Findings;
+using Reviewer.Core.Providers;
 using Reviewer.Engine;
+using Reviewer.Engine.Config;
 using Reviewer.Engine.State;
 
 namespace Reviewer.Api.Tests;
@@ -21,6 +23,8 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
     private WebApplication _app = null!;
     private EngineClient _client = null!;
     private int _wakes;
+    private readonly FakeProvider _provider = new();
+    private Exception? _connectError;
 
     private static CancellationToken Ct => CancellationToken.None;
 
@@ -30,7 +34,9 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
     {
         _paths = new ReviewerPaths(_dir.FullName);
         _store = await ReviewStore.OpenAsync(_paths.Database, TimeProvider.System, Ct);
-        var engine = new EngineServices(_paths, _store, [new FakeAgent()], () => Interlocked.Increment(ref _wakes), TimeProvider.System, DateTimeOffset.UtcNow);
+        var engine = new EngineServices(
+            _paths, _store, [new FakeAgent()], () => Interlocked.Increment(ref _wakes), TimeProvider.System, DateTimeOffset.UtcNow,
+            (_, _) => _connectError is { } e ? Task.FromException<IRepositoryProvider>(e) : Task.FromResult<IRepositoryProvider>(_provider));
         _app = await LocalApi.StartAsync(engine, _paths.Socket, log: null, Ct, eventPollInterval: TimeSpan.FromMilliseconds(50));
         _client = new EngineClient(_paths.Socket);
     }
@@ -286,6 +292,156 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
         Assert.True(valid.Valid);
         Assert.Empty(valid.Errors);
         Assert.False(File.Exists(_paths.Config));
+    }
+
+    [Fact]
+    public async Task ConfigFile_WithoutAFile_IsEmpty()
+    {
+        var file = await Http.GetFromJsonAsync<ConfigText>("config/file", ApiJson.Options, Ct);
+
+        Assert.Equal("", file!.Yaml);
+        Assert.NotEmpty(file.Hash);
+    }
+
+    [Fact]
+    public async Task EditConfig_ChangesOnlyThoseSpans_AndReturnsTheNewHash()
+    {
+        await File.WriteAllTextAsync(_paths.Config, "# mine\ndefaults:\n  review:\n    mode: comment   # for now\n", Ct);
+        var file = (await Http.GetFromJsonAsync<ConfigText>("config/file", ApiJson.Options, Ct))!;
+
+        using var response = await Http.PatchAsJsonAsync("config", new
+        {
+            baseHash = file.Hash,
+            edits = new object[]
+            {
+                new { op = "set", path = "defaults.review.mode", value = "gate" },
+                new { op = "add", path = "repos", value = new { repo = "acme/api" } },
+            },
+        }, ApiJson.Options, Ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var saved = await ReadAsync<ConfigText>(response);
+        Assert.Equal("# mine\ndefaults:\n  review:\n    mode: gate   # for now\nrepos:\n  - { repo: acme/api }\n", saved.Yaml);
+        Assert.Equal(saved.Yaml, await File.ReadAllTextAsync(_paths.Config, Ct));
+        Assert.Equal(saved, await Http.GetFromJsonAsync<ConfigText>("config/file", ApiJson.Options, Ct));
+    }
+
+    [Fact]
+    public async Task EditConfig_AfterAHandEdit_IsAConflict_AndWritesNothing()
+    {
+        var file = (await Http.GetFromJsonAsync<ConfigText>("config/file", ApiJson.Options, Ct))!;
+        await File.WriteAllTextAsync(_paths.Config, "agents: { default: codex }\n", Ct);
+
+        using var response = await Http.PatchAsJsonAsync(
+            "config", new { baseHash = file.Hash, edits = new[] { new { op = "set", path = "agents.default", value = "claude-code" } } }, ApiJson.Options, Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct));
+        var current = (await Http.GetFromJsonAsync<ConfigText>("config/file", ApiJson.Options, Ct))!;
+        Assert.Equal(current.Hash, problem.RootElement.GetProperty("currentHash").GetString());
+        Assert.Equal("agents: { default: codex }\n", current.Yaml);
+    }
+
+    [Theory]
+    [InlineData("set", "defaults.review.mode", "nope", "defaults.review.mode")]
+    [InlineData("remove", "repos[3]", null, "repos[3] doesn't exist.")]
+    public async Task EditConfig_ThatBreaksIt_IsUnprocessable_AndWritesNothing(string op, string path, string? value, string error)
+    {
+        var file = (await Http.GetFromJsonAsync<ConfigText>("config/file", ApiJson.Options, Ct))!;
+
+        using var response = await Http.PatchAsJsonAsync("config", new { baseHash = file.Hash, edits = new[] { new { op, path, value } } }, ApiJson.Options, Ct);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains(error, await response.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+        Assert.False(File.Exists(_paths.Config));
+    }
+
+    [Fact]
+    public async Task SaveConfig_ReplacesTheFile_WhenValid()
+    {
+        var file = (await Http.GetFromJsonAsync<ConfigText>("config/file", ApiJson.Options, Ct))!;
+
+        using var bad = await Http.PutAsJsonAsync("config/file", new ConfigSave("defaults: { review: { mode: nope } }\n", file.Hash), ApiJson.Options, Ct);
+        using var good = await Http.PutAsJsonAsync("config/file", new ConfigSave("# hand-written\nagents: { default: codex }\n", file.Hash), ApiJson.Options, Ct);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, bad.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
+        Assert.Equal("# hand-written\nagents: { default: codex }\n", await File.ReadAllTextAsync(_paths.Config, Ct));
+    }
+
+    [Fact]
+    public async Task Accounts_ListTheConfiguredOnes_WithTokenReferencesOnly()
+    {
+        await File.WriteAllTextAsync(_paths.Config, "accounts: [{ id: gh, token: 'env:GH_WORK' }, { id: gl, provider: gitlab }]\n", Ct);
+
+        var accounts = await Http.GetFromJsonAsync<List<AccountDto>>("accounts", ApiJson.Options, Ct);
+
+        Assert.Equal(
+            [new AccountDto("gh", "github", new Uri("https://github.com"), "env:GH_WORK"), new AccountDto("gl", "gitlab", new Uri("https://gitlab.com"), null)],
+            accounts);
+    }
+
+    [Fact]
+    public async Task AccountStatus_SaysWhoseTokenItIs_OrWhyItFails()
+    {
+        var ok = await Http.GetFromJsonAsync<AccountStatus>("accounts/github/status", ApiJson.Options, Ct);
+        _provider.Error = FakeProvider.Unauthorized();
+        var rejected = await Http.GetFromJsonAsync<AccountStatus>("accounts/github/status", ApiJson.Options, Ct);
+        _connectError = new InvalidOperationException("No token for github.");
+        var missing = await Http.GetFromJsonAsync<AccountStatus>("accounts/github/status", ApiJson.Options, Ct);
+
+        Assert.Equal(new AccountStatus("github", true, "reviewer-bot", null), ok);
+        Assert.False(rejected!.SignedIn);
+        Assert.Contains("Bad credentials", rejected.Problem, StringComparison.Ordinal);
+        Assert.Equal(new AccountStatus("github", false, null, "No token for github."), missing);
+    }
+
+    [Fact]
+    public async Task AccountRepos_MarksTheWatchedOnes()
+    {
+        await File.WriteAllTextAsync(_paths.Config, "repos: [{ repo: ACME/api }]\n", Ct);
+        _provider.Repos.AddRange([new RepoRef(new Uri("https://github.com"), "acme", "api"), new RepoRef(new Uri("https://github.com"), "acme", "web")]);
+
+        var repos = await Http.GetFromJsonAsync<List<RepoChoice>>("accounts/github/repos?owner=acme", ApiJson.Options, Ct);
+
+        Assert.Equal([new RepoChoice("acme/api", true), new RepoChoice("acme/web", false)], repos);
+        Assert.Equal("acme", Assert.Single(_provider.Listed));
+    }
+
+    [Theory]
+    [InlineData("accounts/nobody/repos", HttpStatusCode.NotFound)]
+    [InlineData("accounts/github/repos", HttpStatusCode.BadGateway)]
+    public async Task AccountRepos_Failures(string path, HttpStatusCode status)
+    {
+        _provider.Error = FakeProvider.Unauthorized();
+
+        using var response = await Http.GetAsync(path, Ct);
+
+        Assert.Equal(status, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Pulls_ListWatchedOpenPrs_WithTitlesAndTheirNewestJob()
+    {
+        var repo = new RepoRef(new Uri("https://github.com"), "acme", "api");
+        PullRequestSummary Open(int number, string title) =>
+            new(new PullRequestRef(repo, number), $"head{number}", "main", "alice", [], ["reviewer-bot"], [], false, title);
+        await _store.SaveSeenAsync(
+            repo,
+            new Dictionary<int, Engine.SeenPullRequest> { [7] = new("head7", true, false, true), [8] = new("head8", false, false, false) },
+            [Open(7, "Fix totals"), Open(8, "Docs"), Open(9, "Draft, filtered out")],
+            Ct);
+        await _store.StartJobAsync(Job("old", 7), Ct);
+        await Task.Delay(10, Ct);
+        await _store.StartJobAsync(Job("new", 7), Ct);
+
+        var pulls = (await Http.GetFromJsonAsync<List<WatchedPullRequestDto>>("pulls?repo=acme/api", ApiJson.Options, Ct))!;
+
+        Assert.Equal([(8, "Docs", false), (7, "Fix totals", true)], pulls.Select(p => (p.Number, p.Title, p.Matched)));
+        Assert.Equal("new", pulls[1].LatestJob!.Job.Id);
+        Assert.Null(pulls[0].LatestJob);
+        Assert.Null(pulls[1].LastReview);
+        Assert.Empty((await Http.GetFromJsonAsync<List<WatchedPullRequestDto>>("pulls?repo=acme/web", ApiJson.Options, Ct))!);
     }
 
     [Fact]

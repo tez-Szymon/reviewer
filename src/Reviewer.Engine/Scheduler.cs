@@ -172,7 +172,7 @@ public sealed class Scheduler(ReviewStore store, IPollSource source, TimeProvide
         finally
         {
             // A PR whose handling failed keeps its old record, so the next poll handles it again.
-            await store.SaveSeenAsync(repo, seenNow, [.. open.Select(p => p.Ref.Number)], ct).ConfigureAwait(false);
+            await store.SaveSeenAsync(repo, seenNow, open, ct).ConfigureAwait(false);
         }
     }
 

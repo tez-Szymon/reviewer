@@ -379,7 +379,14 @@ serve.SetAction(async (_, ct) =>
             using var source = new PollSource(paths, runner);
             var scheduler = new Scheduler(store, source, TimeProvider.System, worker.Wake, Log);
             var api = await StartApiAsync(
-                new EngineServices(paths, store, [.. AgentsConfig.Known.Select(id => ReviewFactory.Agent(id, null, runner))], worker.Wake, TimeProvider.System, DateTimeOffset.UtcNow),
+                new EngineServices(
+                    paths,
+                    store,
+                    [.. AgentsConfig.Known.Select(id => ReviewFactory.Agent(id, null, runner))],
+                    worker.Wake,
+                    TimeProvider.System,
+                    DateTimeOffset.UtcNow,
+                    source.GetProviderAsync),
                 ct);
             Log($"Engine started on {paths.Root}, watching {config.Repos.Count} repo(s); Ctrl+C stops it.");
             try

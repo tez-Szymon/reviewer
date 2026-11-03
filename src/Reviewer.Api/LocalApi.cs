@@ -20,8 +20,18 @@ namespace Reviewer.Api;
 
 /// <summary>What the API serves from: the engine's store and folders, its agents, and a way to wake its queue worker.</summary>
 /// <param name="Wake">Makes the queue worker look at the queue now, e.g. <see cref="QueueWorker.Wake"/>.</param>
+/// <param name="Providers">
+/// The provider for an account, for browsing its repos; throws <see cref="InvalidOperationException"/> when the account
+/// can't connect, e.g. without a token. Null serves no account endpoints that need one.
+/// </param>
 public sealed record EngineServices(
-    ReviewerPaths Paths, ReviewStore Store, IReadOnlyList<IReviewAgent> Agents, Action Wake, TimeProvider Time, DateTimeOffset StartedAt);
+    ReviewerPaths Paths,
+    ReviewStore Store,
+    IReadOnlyList<IReviewAgent> Agents,
+    Action Wake,
+    TimeProvider Time,
+    DateTimeOffset StartedAt,
+    Func<AccountConfig, CancellationToken, Task<IRepositoryProvider>>? Providers = null);
 
 /// <summary>
 /// The engine's local HTTP API: a minimal API on a Unix domain socket in the data folder, never on TCP, so other users
@@ -111,6 +121,48 @@ public static class LocalApi
             });
             return await Task.WhenAll(checks).ConfigureAwait(false);
         }).WithSummary("Whether each agent is installed, logged in and ready");
+
+        api.MapGet("/accounts", async Task<Results<Ok<List<AccountDto>>, ProblemHttpResult>> (CancellationToken ct) =>
+        {
+            try
+            {
+                var config = await ConfigLoader.LoadAsync(engine.Paths.Config, ct).ConfigureAwait(false);
+                return TypedResults.Ok(config.Accounts.Select(a => new AccountDto(a.Id, a.Provider, a.Host, a.Token)).ToList());
+            }
+            catch (ConfigException e)
+            {
+                return ConfigProblem(e, StatusCodes.Status422UnprocessableEntity);
+            }
+        }).WithSummary("The accounts in the config; without any, the implicit github.com one");
+
+        api.MapGet("/accounts/{id}/status", (string id, CancellationToken ct) => WithProviderAsync(engine, id, async (account, provider) =>
+        {
+            try
+            {
+                return new AccountStatus(account.Id, true, await provider.GetCurrentUserAsync(ct).ConfigureAwait(false), null);
+            }
+            catch (ProviderApiException e)
+            {
+                return new AccountStatus(account.Id, false, null, e.Message);
+            }
+        }, ct, connectProblem: (account, message) => new AccountStatus(account.Id, false, null, message)))
+            .WithSummary("Whether the account's token works, and whose it is");
+
+        api.MapGet("/accounts/{id}/repos", (string id, string? owner, CancellationToken ct) => WithProviderAsync(engine, id, async (account, provider) =>
+        {
+            var config = await ConfigLoader.LoadAsync(engine.Paths.Config, ct).ConfigureAwait(false);
+            var watched = config.Repos
+                .Where(r => (r.Account ?? config.Accounts[0].Id) == account.Id)
+                .Select(r => r.Repo)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var repos = new List<RepoChoice>();
+            await foreach (var repo in provider.ListAccessibleReposAsync(owner, ct).ConfigureAwait(false))
+            {
+                repos.Add(new RepoChoice(repo.ToString(), watched.Contains(repo.ToString())));
+            }
+
+            return repos;
+        }, ct)).WithSummary("Repos the account can see, all or one owner's (a user, an organization, or a GitLab group with its subgroups), marked when watched");
 
         api.MapGet("/queue", async (CancellationToken ct) =>
                 (await store.ListQueueAsync(ct).ConfigureAwait(false)).Select(JobDto.From).ToList())
@@ -206,6 +258,10 @@ public static class LocalApi
             return TypedResults.Ok(JobDto.From(retried!.Job));
         }).WithSummary("Queue a failed, cancelled or throttled job again, to run now");
 
+        api.MapGet("/pulls", async (string? repo, CancellationToken ct) =>
+            (await store.ListWatchedAsync(repo, ct).ConfigureAwait(false)).Select(WatchedPullRequestDto.From).ToList())
+            .WithSummary("Open PRs in watched repos as reviewer serve last polled them, with each one's last review and newest job");
+
         api.MapGet("/pulls/{owner}/{repo}/{number:int}", async Task<Results<Ok<PullRequestDto>, ProblemHttpResult>> (
             string owner, string repo, int number, string? host, CancellationToken ct) =>
         {
@@ -273,6 +329,17 @@ public static class LocalApi
                 return new ConfigValidation(false, e.Errors);
             }
         }).Accepts<string>("application/yaml", "text/plain").WithSummary("Check a config.yaml without saving it");
+
+        api.MapGet("/config/file", (CancellationToken ct) => ConfigFile.ReadAsync(engine.Paths.Config, ct))
+            .WithSummary("config.yaml as written, with the hash a save must name; empty when there's no file");
+
+        api.MapPut("/config/file", (ConfigSave save, CancellationToken ct) =>
+            SaveConfigAsync(() => ConfigFile.SaveAsync(engine.Paths.Config, save.Yaml, save.BaseHash, ct)))
+            .WithSummary("Replace config.yaml, if it still has the base hash and the new one is valid");
+
+        api.MapPatch("/config", (ConfigEdits request, CancellationToken ct) =>
+            SaveConfigAsync(() => ConfigFile.EditAsync(engine.Paths.Config, request.Edits, request.BaseHash, ct)))
+            .WithSummary("Set, remove or add values at key paths such as repos[0].overrides.review.mode, changing only those spans of config.yaml, so its comments and layout stay");
 
         api.MapGet("/events", (HttpContext context, IHostApplicationLifetime lifetime, long? after) =>
         {
@@ -354,6 +421,69 @@ public static class LocalApi
             e.Errors.Count == 1 ? e.Errors[0] : $"{ConfigLoader.FileName} has {e.Errors.Count} problems.",
             statusCode: status,
             extensions: new Dictionary<string, object?> { ["errors"] = e.Errors });
+
+    /// <summary>
+    /// Runs <paramref name="use"/> with the account's provider: 404 for an unknown account, 422 when the config is
+    /// invalid or the account can't connect (unless <paramref name="connectProblem"/> answers that), 502 when the
+    /// provider's API fails.
+    /// </summary>
+    private static async Task<Results<Ok<T>, ProblemHttpResult>> WithProviderAsync<T>(
+        EngineServices engine,
+        string id,
+        Func<AccountConfig, IRepositoryProvider, Task<T>> use,
+        CancellationToken ct,
+        Func<AccountConfig, string, T>? connectProblem = null)
+    {
+        AccountConfig? account = null;
+        try
+        {
+            var config = await ConfigLoader.LoadAsync(engine.Paths.Config, ct).ConfigureAwait(false);
+            account = config.Accounts.FirstOrDefault(a => a.Id == id);
+            if (account is null)
+            {
+                return TypedResults.Problem($"No account with id '{id}'.", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            if (engine.Providers is null)
+            {
+                return TypedResults.Problem("This engine can't connect to accounts.", statusCode: StatusCodes.Status501NotImplemented);
+            }
+
+            var provider = await engine.Providers(account, ct).ConfigureAwait(false);
+            return TypedResults.Ok(await use(account, provider).ConfigureAwait(false));
+        }
+        catch (ConfigException e)
+        {
+            return ConfigProblem(e, StatusCodes.Status422UnprocessableEntity);
+        }
+        catch (InvalidOperationException e) when (account is not null)
+        {
+            return connectProblem is not null
+                ? TypedResults.Ok(connectProblem(account, e.Message))
+                : TypedResults.Problem(e.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
+        catch (ProviderApiException e)
+        {
+            return TypedResults.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
+    private static async Task<Results<Ok<ConfigText>, ProblemHttpResult>> SaveConfigAsync(Func<Task<ConfigText>> save)
+    {
+        try
+        {
+            return TypedResults.Ok(await save().ConfigureAwait(false));
+        }
+        catch (ConfigConflictException e)
+        {
+            return TypedResults.Problem(
+                e.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["currentHash"] = e.CurrentHash });
+        }
+        catch (ConfigException e)
+        {
+            return ConfigProblem(e, StatusCodes.Status422UnprocessableEntity);
+        }
+    }
 
     private static ProblemHttpResult Conflict(string detail) => TypedResults.Problem(detail, statusCode: StatusCodes.Status409Conflict);
 

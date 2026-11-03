@@ -60,6 +60,7 @@ public sealed record ProviderCapabilities(
     bool SupportsMergeWhenGreen);
 
 /// <summary>An open PR as the repo's PR list shows it: enough to apply trigger rules without reading each PR.</summary>
+/// <param name="Title">Untrusted author text, for showing the PR in lists.</param>
 public sealed record PullRequestSummary(
     PullRequestRef Ref,
     string HeadSha,
@@ -68,7 +69,8 @@ public sealed record PullRequestSummary(
     IReadOnlyList<string> Assignees,
     IReadOnlyList<string> RequestedReviewers,
     IReadOnlyList<string> Labels,
-    bool IsDraft);
+    bool IsDraft,
+    string Title = "");
 
 /// <summary>A repo's open PRs, or word that they haven't changed since the list with the given ETag.</summary>
 /// <param name="ETag">Pass back on the next poll; null when the provider sent none.</param>

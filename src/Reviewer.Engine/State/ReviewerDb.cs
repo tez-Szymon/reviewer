@@ -234,6 +234,11 @@ public sealed class SeenPullRequestRecord
 
     public required string HeadSha { get; set; }
 
+    /// <summary>For lists; untrusted author text.</summary>
+    public string Title { get; set; } = "";
+
+    public string Author { get; set; } = "";
+
     /// <summary>An initial trigger matched.</summary>
     public bool Matched { get; set; }
 
