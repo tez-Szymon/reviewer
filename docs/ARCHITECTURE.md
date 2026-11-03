@@ -44,7 +44,8 @@ Solution layout:
 | `Reviewer.Agents.Cli` | Claude Code and Codex runners (process + file contract) |
 | `Reviewer.Agents.Api` | API runners via `Microsoft.Extensions.AI` |
 | `Reviewer.Engine` | Generic Host, scheduler, job queue, pipeline, persistence |
-| `Reviewer.Api` | Local HTTP API on a Unix domain socket / named pipe, SSE events |
+| `Reviewer.Api` | Local HTTP API on a Unix domain socket, SSE events |
+| `Reviewer.Api.Client` | The API's contract (request and response types) and `EngineClient`, without ASP.NET Core; shared by the engine, CLI and desktop |
 | `Reviewer.Cli` | `System.CommandLine` client; can host the engine in-process |
 | `Reviewer.Desktop` | Avalonia app (MVVM, CommunityToolkit.Mvvm); starts the engine if not running |
 | `Reviewer.Instructions` | Built-in review instructions as embedded resources |
@@ -376,7 +377,7 @@ The effective config per job is computed and stored with the review. A policy ch
 | `GET /agents` | Each agent's health: installed, logged in, version |
 | `GET /queue` | Queued, running and throttled jobs, oldest first |
 | `GET /jobs?repo=&number=&limit=` | Past and current jobs, newest first, with finding counts |
-| `GET /jobs/{id}` | One job with its findings, by id or unique start |
+| `GET /jobs/{id}` | One job with its findings and the policy's reasons (from the attempt's `plan.json`), by id or unique start |
 | `POST /jobs` | Queue a review (`{url, dryRun, full, agent}`), as `reviewer queue add` |
 | `POST /jobs/{id}/cancel`, `/retry` | As `reviewer queue cancel` and `retry` |
 | `GET /pulls/{owner}/{repo}/{number}?host=` | A PR's last published review, open findings and jobs |
@@ -389,6 +390,7 @@ The effective config per job is computed and stored with the review. A policy ch
 | `GET /accounts/{id}/repos?owner=` | Repos the account can see, all or one user's, organization's or GitLab group's (subgroups included), marked when watched |
 | `GET /pulls?repo=` | Open PRs in watched repos as last polled, with title, author, last review and newest job |
 | `GET /events` | Server-Sent Events: a `job` event per change to a job |
+| `POST /shutdown` | Stop the engine as Ctrl+C does; the desktop app uses it for an engine it started |
 | `GET /openapi/v1.json` | The OpenAPI spec |
 
 Responses are JSON with camelCase keys and kebab-case enum values, as in the config; errors are problem details. The API reads the same database as the CLI and reads the config file on each request, so it shows what the CLI changed and the config the next job will use. Writes wake the queue worker, so a queued, cancelled or retried job is acted on at once instead of at the next poll.
@@ -400,22 +402,28 @@ The account endpoints use the providers `reviewer serve`'s scheduler keeps, one 
 - **GitHub:** `user/repos`; for one owner, the token owner's own repos, an organization's, or another user's public ones.
 - **GitLab:** `projects?membership=true`; for one owner, a group's projects with its subgroups', or a user's.
 
-The OpenAPI spec is there for the desktop's typed client; `EngineClient` in `Reviewer.Api` is the hand-written client the CLI uses for now.
+The CLI and the desktop app share one client, `EngineClient` in `Reviewer.Api.Client` (behind `IEngineClient`, so view models test against a fake), and the engine's own request and response types, so there is no generated code to keep in step. The OpenAPI spec stays for other clients.
 
-**Engine lifetime.** The desktop app starts the engine as a child process if none is running and offers "start at login" (LaunchAgent on macOS, Startup entry on Windows). Closing the window leaves a tray icon; quitting the app stops the engine unless "keep running" is on.
+**Engine lifetime.** The desktop app uses an engine already listening on the socket, or starts `reviewer serve` as a child process and waits up to 20 seconds for its API. The CLI is `REVIEWER_CLI` when set, otherwise the one beside the app (the build puts it there), otherwise the first on `PATH`. The engine's output is appended to `engine.log` in the data folder.
+
+Quitting the app stops an engine it started: `POST /shutdown`, which requeues a running review as Ctrl+C does, and a kill if the engine hasn't exited within 15 seconds. An engine started elsewhere, such as `reviewer serve` in a terminal, keeps running. If the event stream breaks, the app says it lost the engine, looks for one every 3 seconds, and resumes the stream after the last version it saw. "Start engine" starts one.
+
+Planned with the tray icon: "start at login" (LaunchAgent on macOS, Startup entry on Windows), closing the window to the tray, and "keep running" to leave a started engine up on quit.
 
 **Desktop app (Avalonia).**
 
 | Screen | Content |
 |---|---|
-| Queue | Pending, running, throttled jobs; cancel, retry, run now |
+| Queue | Pending, running, throttled jobs; cancel, retry |
 | PRs | Watched PRs with last review state and decision |
 | Review detail | Findings list, delta range, policy decision and why, agent log, link to PR |
-| History | Past runs, filter by repo, mode, outcome |
+| History | The 500 newest runs, filter by repo and outcome |
 | Repos | Browse accounts, add by URL, per-repo overrides |
 | Settings | Accounts and tokens, agents and health, global policy, skills |
 
-Stack: Avalonia 11 + CommunityToolkit.Mvvm, a FluentAvalonia-style theme, tray icon via Avalonia's `TrayIcon`. Packaging: macOS `.app` signed and notarized (needs an Apple Developer account), Windows MSIX or Velopack installer. Velopack also handles auto-update on both.
+Each page loads its list once the event stream is open, then applies events over it, the higher version of a job winning, so a change made while the list loads isn't lost. Built so far: Queue, PRs, Review detail and History. Repos and Settings come next, on the config endpoints.
+
+Stack: Avalonia 12 + CommunityToolkit.Mvvm, Avalonia's built-in Fluent theme with the app's own light and dark brushes, tray icon via Avalonia's `TrayIcon`. The app's assembly is `Reviewer.Desktop`, not `Reviewer`, so it can't be confused with the CLI's `reviewer` beside it on file systems that ignore case. Packaging: macOS `.app` signed and notarized (needs an Apple Developer account), Windows MSIX or Velopack installer. Velopack also handles auto-update on both.
 
 **CLI.** `System.CommandLine`, published single-file per OS.
 

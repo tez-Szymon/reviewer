@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             x:Class="Reviewer.Desktop.Views.QueueView"
+             x:DataType="vm:QueueViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
+      <TextBlock Classes="title" Text="Queue" />
+      <TextBlock Classes="muted" Text="Reviews waiting, running, or throttled until the agent can take more, oldest first." />
+      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    </StackPanel>
+    <ListBox x:Name="List" ItemsSource="{Binding Jobs}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:JobItem">
+          <Grid ColumnDefinitions="2*,2*,*,90,200" ColumnSpacing="12">
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock FontWeight="SemiBold" Text="{Binding Pr}" />
+              <TextBlock Classes="muted" FontSize="12" Text="{Binding Id}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+              <TextBlock TextWrapping="Wrap" Text="{Binding StateText}" />
+              <TextBlock Classes="error" FontSize="12" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Classes="muted" Text="{Binding Job.AgentId}" />
+            <TextBlock Grid.Column="3" VerticalAlignment="Center" Classes="muted" Text="{Binding When}" />
+            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+              <Button Content="Retry" IsVisible="{Binding CanRetry}"
+                      Command="{Binding #List.((vm:QueueViewModel)DataContext).RetryCommand}" CommandParameter="{Binding}" />
+              <Button Content="Cancel" IsVisible="{Binding CanCancel}"
+                      Command="{Binding #List.((vm:QueueViewModel)DataContext).CancelCommand}" CommandParameter="{Binding}" />
+              <Button Content="Open"
+                      Command="{Binding #List.((vm:QueueViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}" />
+            </StackPanel>
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</UserControl>

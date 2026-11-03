@@ -2,8 +2,10 @@
   <Folder Name="/src/">
     <Project Path="src/Reviewer.Agents.Cli/Reviewer.Agents.Cli.csproj" />
     <Project Path="src/Reviewer.Api/Reviewer.Api.csproj" />
+    <Project Path="src/Reviewer.Api.Client/Reviewer.Api.Client.csproj" />
     <Project Path="src/Reviewer.Cli/Reviewer.Cli.csproj" />
     <Project Path="src/Reviewer.Core/Reviewer.Core.csproj" />
+    <Project Path="src/Reviewer.Desktop/Reviewer.Desktop.csproj" />
     <Project Path="src/Reviewer.Engine/Reviewer.Engine.csproj" />
     <Project Path="src/Reviewer.Git/Reviewer.Git.csproj" />
     <Project Path="src/Reviewer.Instructions/Reviewer.Instructions.csproj" />
@@ -15,6 +17,7 @@
     <Project Path="tests/Reviewer.Api.Tests/Reviewer.Api.Tests.csproj" />
     <Project Path="tests/Reviewer.Cli.Tests/Reviewer.Cli.Tests.csproj" />
     <Project Path="tests/Reviewer.Core.Tests/Reviewer.Core.Tests.csproj" />
+    <Project Path="tests/Reviewer.Desktop.Tests/Reviewer.Desktop.Tests.csproj" />
     <Project Path="tests/Reviewer.Engine.Tests/Reviewer.Engine.Tests.csproj" />
     <Project Path="tests/Reviewer.Git.Tests/Reviewer.Git.Tests.csproj" />
     <Project Path="tests/Reviewer.Instructions.Tests/Reviewer.Instructions.Tests.csproj" />

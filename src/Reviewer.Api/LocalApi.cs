@@ -31,7 +31,11 @@ public sealed record EngineServices(
     Action Wake,
     TimeProvider Time,
     DateTimeOffset StartedAt,
-    Func<AccountConfig, CancellationToken, Task<IRepositoryProvider>>? Providers = null);
+    Func<AccountConfig, CancellationToken, Task<IRepositoryProvider>>? Providers = null)
+{
+    /// <summary>Stops the engine as Ctrl+C does; null when it can only be stopped from its terminal.</summary>
+    public Action? Stop { get; init; }
+}
 
 /// <summary>
 /// The engine's local HTTP API: a minimal API on a Unix domain socket in the data folder, never on TCP, so other users
@@ -112,6 +116,17 @@ public static class LocalApi
         api.MapGet("/status", () => new EngineStatus(ReviewStore.AppVersion, Environment.ProcessId, engine.StartedAt, engine.Paths.Root))
             .WithSummary("The engine process");
 
+        api.MapPost("/shutdown", Results<Accepted, ProblemHttpResult> () =>
+        {
+            if (engine.Stop is null)
+            {
+                return TypedResults.Problem("This engine can only be stopped from its terminal.", statusCode: StatusCodes.Status501NotImplemented);
+            }
+
+            engine.Stop();
+            return TypedResults.Accepted((string?)null);
+        }).WithSummary("Stop the engine as Ctrl+C does: a running review is cancelled and requeued, then the API closes");
+
         api.MapGet("/agents", async (CancellationToken ct) =>
         {
             var checks = engine.Agents.Select(async agent =>
@@ -190,7 +205,7 @@ public static class LocalApi
             {
                 (null, null) => TypedResults.NotFound(),
                 (_, { } problem) => problem,
-                ({ } details, _) => TypedResults.Ok(JobDetailsDto.From(details)),
+                ({ } details, _) => TypedResults.Ok(JobDetailsDto.From(details, await ReadReasonsAsync(details.Job.AttemptFolder, ct).ConfigureAwait(false))),
             }).WithSummary("One job with its findings, by id or its unique start");
 
         api.MapPost("/jobs", async Task<Results<Created<QueueResult>, Ok<QueueResult>, ProblemHttpResult>> (
@@ -465,6 +480,28 @@ public static class LocalApi
         catch (ProviderApiException e)
         {
             return TypedResults.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
+    /// <summary>Why the policy decided as it did, from the attempt's plan; empty before there's one.</summary>
+    private static async Task<IReadOnlyList<string>> ReadReasonsAsync(string? attemptFolder, CancellationToken ct)
+    {
+        if (attemptFolder is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            await using var file = File.OpenRead(Path.Combine(attemptFolder, ReviewRunner.PlanFile));
+            using var plan = await System.Text.Json.JsonDocument.ParseAsync(file, cancellationToken: ct).ConfigureAwait(false);
+            return plan.RootElement.TryGetProperty("reasons", out var reasons)
+                ? [.. reasons.EnumerateArray().Select(r => r.GetString() ?? "")]
+                : [];
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return [];
         }
     }
 

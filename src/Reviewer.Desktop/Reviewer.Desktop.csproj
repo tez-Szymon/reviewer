@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Not "Reviewer": file systems that ignore case would mix it up with the CLI's "reviewer" beside it. -->
+    <AssemblyName>Reviewer.Desktop</AssemblyName>
+    <RootNamespace>Reviewer.Desktop</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- UI code resumes on the UI thread after awaiting; ConfigureAwait(false) would be the bug here. -->
+    <NoWarn>$(NoWarn);CA2007</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Reviewer.Desktop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Reviewer.Api.Client\Reviewer.Api.Client.csproj" />
+    <!-- Builds the reviewer CLI next to the app, so the app can start the engine with 'reviewer serve'. -->
+    <ProjectReference Include="..\Reviewer.Cli\Reviewer.Cli.csproj" />
+  </ItemGroup>
+
+</Project>
