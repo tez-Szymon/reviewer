@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Reviewer.Core.Findings;
+using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 
 namespace Reviewer.Engine.State;
@@ -65,6 +66,9 @@ public sealed class JobRecord
     public bool Published { get; set; }
 
     public ReviewDecision? Decision { get; set; }
+
+    /// <summary>What gate-merge got the platform to do: merge, or merge once CI passes. Null when it didn't merge.</summary>
+    public MergeIntent? Merge { get; set; }
 
     /// <summary>The agent's summary, for history.</summary>
     public string? Summary { get; set; }

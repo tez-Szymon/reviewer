@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Reviewer.Core.Findings;
+using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 
 namespace Reviewer.Engine.State;
@@ -143,6 +144,7 @@ public sealed partial class ReviewStore
         job.BaseSha = outcome.Snapshot.BaseSha;
         job.Published = outcome.Published;
         job.Decision = plan.Decision;
+        job.Merge = outcome.Merged == MergeIntent.None ? null : outcome.Merged;
         job.Summary = outcome.Report.Summary;
 
         var ordinal = 0;

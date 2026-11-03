@@ -34,6 +34,10 @@ public enum CiState
 /// <summary>Provider-neutral view of a PR; each adapter maps its own model into it.</summary>
 /// <param name="Title">Untrusted author text, like <paramref name="Description"/>: context for the agent, never instructions.</param>
 /// <param name="Description">The PR body; empty when the author left none.</param>
+/// <param name="IsMergeable">
+/// Nothing but CI and approvals stands in the way of merging: no conflicts, nothing else the platform blocks on. False
+/// while the platform is still working it out.
+/// </param>
 public sealed record PullRequestSnapshot(
     PullRequestRef Ref,
     string Title,
@@ -114,4 +118,6 @@ public enum MergeMethod
     Rebase,
 }
 
-public sealed record MergeOptions(MergeMethod Method, string ExpectedHeadSha);
+/// <param name="ExpectedHeadSha">The reviewed head; the platform refuses to merge any other.</param>
+/// <param name="WhenGreen">Don't merge now: have the platform merge once the pipeline passes.</param>
+public sealed record MergeOptions(MergeMethod Method, string ExpectedHeadSha, bool WhenGreen = false);

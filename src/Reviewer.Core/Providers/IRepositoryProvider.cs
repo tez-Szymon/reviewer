@@ -26,5 +26,10 @@ public interface IRepositoryProvider
     Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct);
     /// <summary>Replies to <paramref name="comment"/> with <paramref name="note"/> and resolves its thread.</summary>
     Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct);
+
+    /// <summary>
+    /// Merges the PR, or with <see cref="MergeOptions.WhenGreen"/> has the platform merge it once its pipeline passes
+    /// (needs <see cref="ProviderCapabilities.SupportsMergeWhenGreen"/>). Either way only at the expected head.
+    /// </summary>
     Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct);
 }

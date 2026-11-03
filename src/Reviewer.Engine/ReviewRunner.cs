@@ -41,6 +41,9 @@ public sealed record ReviewOutcome(
 {
     /// <summary>Things that went wrong after the review was published, such as a thread that couldn't be resolved.</summary>
     public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    /// <summary>What the platform accepted: a merge, or a merge once CI passes. None when the merge was refused.</summary>
+    public MergeIntent Merged { get; init; }
 }
 
 /// <summary>
@@ -131,7 +134,7 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
         {
             await store.UpdateJobAsync(jobId, snapshot, delta, null, ct).ConfigureAwait(false);
             await store.SkipJobAsync(jobId, delta.Reason, CancellationToken.None).ConfigureAwait(false);
-            var nothing = new ReviewPlan(delta.Reason, [], [], [], [], ReviewDecision.None, Merge: false, UnresolvedThreads: false, [delta.Reason]);
+            var nothing = new ReviewPlan(delta.Reason, [], [], [], [], ReviewDecision.None, MergeIntent.None, UnresolvedThreads: false, [delta.Reason]);
             return new ReviewOutcome(jobId, null, snapshot, delta, new FindingsReport("", []), nothing, Published: false, Skipped: true);
         }
 
@@ -167,8 +170,13 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
         // shows it, as dropped. Checked against the PR, not `dismissed`: once a review records the dismissal the finding
         // is no longer open, but its thread stays resolved.
         var considered = report with { Findings = [.. report.Findings.Where(f => !resolvedOnPr.Contains(fingerprints[f]))] };
+
+        // The agent took minutes: CI, mergeability and the head may have moved since the snapshot, so merge on a fresh one.
+        var current = request.Policy.Mode == ReviewMode.GateMerge
+            ? await provider.GetSnapshotAsync(pr, ct).ConfigureAwait(false)
+            : snapshot;
         var plan = PolicyEngine.Decide(
-            considered, snapshot, request.Policy, provider.Capabilities, prepared.Scope, [.. stillOpen.Where(o => o.Blocking).Select(o => o.Finding)]);
+            considered, current, request.Policy, provider.Capabilities, prepared.Scope, [.. stillOpen.Where(o => o.Blocking).Select(o => o.Finding)]);
         if (considered.Findings.Count < report.Findings.Count)
         {
             plan = plan with { Reasons = [.. plan.Reasons, $"Ignored {report.Findings.Count - considered.Findings.Count} finding(s) whose thread a person resolved."] };
@@ -187,10 +195,10 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
 
         var published = !request.Policy.DryRun;
         var warnings = new List<string>();
+        var merged = MergeIntent.None;
         if (published)
         {
             var head = prepared.Scope.ReviewedHeadSha;
-            // Merging is gate-merge only, which comes in M3; until then the plan never asks for it.
             var result = new ReviewResult(
                 $"{plan.Summary}\n\n{Footer(delta, head, fixedFingerprints.Count, dismissed.Count, stillOpen.Count, plan.OpenBlockingFindings.Count)}",
                 [.. plan.InlineFindings.Select(f => new InlineComment(f, fingerprints[f]))],
@@ -216,6 +224,25 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
                     warnings.Add($"Couldn't resolve the thread at {comment.File}:{comment.Line}: {e.Message}");
                 }
             }
+
+            // Last, once the approval is on the PR. The platform refuses any head but the reviewed one, and enforces its
+            // own rules, such as required approvals; a refusal leaves the review standing.
+            if (plan.Merge != MergeIntent.None)
+            {
+                try
+                {
+                    await provider.MergeAsync(
+                        pr, new MergeOptions(request.Policy.MergeMethod, head, WhenGreen: plan.Merge == MergeIntent.MergeWhenGreen), ct)
+                        .ConfigureAwait(false);
+                    merged = plan.Merge;
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    warnings.Add(plan.Merge == MergeIntent.MergeWhenGreen
+                        ? $"Couldn't set the PR to merge when CI passes: {e.Message}"
+                        : $"Couldn't merge: {e.Message}");
+                }
+            }
         }
 
         var outcome = new ReviewOutcome(
@@ -223,6 +250,7 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             Resolved: fixedFingerprints.Count, StillOpen: stillOpen.Count, Dismissed: dismissed.Count)
         {
             Warnings = warnings,
+            Merged = merged,
         };
         await store.CompleteJobAsync(jobId, outcome, fingerprints, deltaPlan.Current, [.. fixedFingerprints, .. dismissed], CancellationToken.None).ConfigureAwait(false);
         return outcome;

@@ -92,7 +92,7 @@ public class PolicyEngineTests
         var plan = Decide(findings, Policy with { Mode = mode });
 
         Assert.Equal(expected, plan.Decision);
-        Assert.Equal(mode == ReviewMode.GateMerge && !hasBlocking, plan.Merge);
+        Assert.Equal(mode == ReviewMode.GateMerge && !hasBlocking ? MergeIntent.Merge : MergeIntent.None, plan.Merge);
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class PolicyEngineTests
 
         Assert.Equal(ReviewDecision.None, blocked.Decision);
         Assert.Equal(ReviewDecision.None, clean.Decision);
-        Assert.False(clean.Merge);
+        Assert.Equal(MergeIntent.None, clean.Merge);
         Assert.Single(blocked.InlineFindings);
     }
 
@@ -265,8 +265,8 @@ public class PolicyEngineTests
 
     public static TheoryData<PullRequestSnapshot, string> FailingGuards => new()
     {
-        { Snapshot with { Ci = CiState.Pending }, "CI is Pending" },
         { Snapshot with { Ci = CiState.Failure }, "CI is Failure" },
+        { Snapshot with { Ci = CiState.Unknown }, "no CI ran" },
         { Snapshot with { IsMergeable = false }, "not mergeable" },
         { Snapshot with { IsDraft = true }, "draft" },
         { Snapshot with { HeadSha = "def456" }, "head moved" },
@@ -279,8 +279,45 @@ public class PolicyEngineTests
         var plan = Decide([F("n1")], Policy with { Mode = ReviewMode.GateMerge }, snapshot);
 
         Assert.Equal(ReviewDecision.Approve, plan.Decision);
-        Assert.False(plan.Merge);
+        Assert.Equal(MergeIntent.None, plan.Merge);
         Assert.Contains(plan.Reasons, r => r.Contains(reason, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Decide_MergesWhenGreen_WhileCiRuns()
+    {
+        var plan = Decide([F("n1")], Policy with { Mode = ReviewMode.GateMerge }, Snapshot with { Ci = CiState.Pending }, GitHub with { SupportsMergeWhenGreen = true });
+
+        Assert.Equal(MergeIntent.MergeWhenGreen, plan.Merge);
+    }
+
+    [Fact]
+    public void Decide_DoesNotMergeWhileCiRuns_WhenProviderCannotWait()
+    {
+        var plan = Decide([F("n1")], Policy with { Mode = ReviewMode.GateMerge }, Snapshot with { Ci = CiState.Pending });
+
+        Assert.Equal(MergeIntent.None, plan.Merge);
+        Assert.Contains(plan.Reasons, r => r.Contains("CI is Pending", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Decide_DoesNotWaitForCi_WhenAnotherGuardFails()
+    {
+        var plan = Decide(
+            [F("n1")], Policy with { Mode = ReviewMode.GateMerge }, Snapshot with { Ci = CiState.Pending, IsDraft = true }, GitHub with { SupportsMergeWhenGreen = true });
+
+        Assert.Equal(MergeIntent.None, plan.Merge);
+    }
+
+    [Theory]
+    [InlineData(CiState.Failure)]
+    [InlineData(CiState.Pending)]
+    [InlineData(CiState.Unknown)]
+    public void Decide_IgnoresCi_WhenGreenCiIsNotRequired(CiState ci)
+    {
+        var plan = Decide([F("n1")], Policy with { Mode = ReviewMode.GateMerge, RequireGreenCi = false }, Snapshot with { Ci = ci });
+
+        Assert.Equal(MergeIntent.Merge, plan.Merge);
     }
 
     [Fact]
@@ -288,14 +325,14 @@ public class PolicyEngineTests
     {
         var plan = Decide([F("n1")], Policy with { Mode = ReviewMode.GateMerge });
 
-        Assert.True(plan.Merge);
+        Assert.Equal(MergeIntent.Merge, plan.Merge);
         Assert.Contains("Merge guards passed.", plan.Reasons);
     }
 
     [Fact]
     public void Decide_NeverMergesOutsideGateMerge()
     {
-        Assert.False(Decide([F("n1")], Policy with { Mode = ReviewMode.Gate }).Merge);
+        Assert.Equal(MergeIntent.None, Decide([F("n1")], Policy with { Mode = ReviewMode.Gate }).Merge);
     }
 
     [Theory]

@@ -92,7 +92,9 @@ Where GitHub and GitLab differ, and the adapter absorbs it:
 | Suggestions | ` ```suggestion ` over the commented range | ` ```suggestion:-N+0 ` counted from the anchored line |
 | Assigned vs reviewer | Assignees and requested reviewers | Assignees and reviewers |
 | CI | Combined status and check runs | The head pipeline's status |
-| Merge | Merge methods per repo | The project's merge method; only squashing is per merge |
+| Merge | Merge methods per repo, refused unless the head is the reviewed SHA | The project's merge method; only squashing is per merge. Refused unless the head is the reviewed SHA |
+| Merge when green | GraphQL `enablePullRequestAutoMerge` with the reviewed head; needs "Allow auto-merge" on the repo, and waits only for the checks branch protection requires | `auto_merge` (and `merge_when_pipeline_succeeds` for instances before 17.11) with the reviewed SHA |
+| Mergeable | `mergeable` (conflicts); null while GitHub computes it counts as not mergeable | `detailed_merge_status` is `mergeable`, or only CI or approvals are missing (`ci_still_running`, `ci_must_pass`, `not_approved`) |
 
 `ProviderCapabilities` exposes flags such as `SupportsRequestChanges`, `SupportsThreadResolve`, `SupportsSuggestions`, `SupportsMergeWhenGreen`. The policy engine checks these instead of assuming.
 
@@ -232,11 +234,13 @@ Steps:
 | `gate` | Approve | Request changes |
 | `gate-merge` | Approve, then merge if guards pass | Request changes |
 
-4. **Merge guards** (always applied when merging): CI green, PR mergeable, not draft, required approvals met, and the head SHA unchanged since review. The last check prevents merging commits the agent never saw.
+4. **Merge guards** (always applied when merging): CI green, PR mergeable, not draft, and the head SHA unchanged since review. The last check prevents merging commits the agent never saw, and the platform enforces it again, since the merge carries the reviewed SHA. Required approvals are the platform's to enforce when merging. With `merge.requireGreenCi: false` the CI guard is skipped. CI still running is not a failure where the provider `SupportsMergeWhenGreen`: the plan asks the platform to merge the reviewed head once CI passes (`MergeIntent.MergeWhenGreen`), since the same head isn't reviewed again. No CI at all fails the guard; set `requireGreenCi: false` for such repos.
 5. **Self-PR rule**: author equals token owner → never approve or request changes; post comments only.
 6. **Capability check**: if the provider lacks a feature (e.g. request changes on GitLab), fall back as configured (`unresolved-threads` or `comment`). Either way the plan asks to withdraw an approval this account gave earlier, so a blocked head is never left approved.
 
-The output `ReviewPlan` lists comments to post, comments to resolve, the decision and merge intent. The publisher executes it, and the plan is stored for history and dry runs.
+The output `ReviewPlan` lists comments to post, comments to resolve, the decision and merge intent (none, merge now, or merge when CI passes). The publisher executes it, and the plan is stored for history and dry runs.
+
+**Merging.** The agent takes minutes, so gate-merge decides on a snapshot read again after the agent finishes, not the one the review started from. The merge goes last, after the approval and the thread resolves are on the PR, with the configured `merge.method` and the reviewed SHA. A refused merge (required approvals missing, auto-merge not allowed on the repo, `rebase` on GitLab) is a warning on a job that still succeeds: the review stands. The job records what the platform accepted.
 
 **Summary comments.** Each review run posts its own summary comment, or several when needed (the provider's comment size limit, or findings grouped by area). Earlier runs' summaries stay as history and are not edited.
 
@@ -409,7 +413,7 @@ reviewer serve                      # run the engine headless
 
 **Storage.** SQLite at `~/.reviewer/reviewer.db` via EF Core, in WAL mode so the CLI can read while the engine writes. The engine applies pending migrations when it opens the database; migrations live in `Reviewer.Engine/State/Migrations` and are added with the repo's local `dotnet ef` tool. Tables:
 
-- `Jobs`: one row per job folder, and the job queue. State machine Queued, Running, Skipped, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, summary, error, retry time, not-before time, full and dry-run flags, a cancel request and the process running it. Failed and throttled runs are recorded too. A trigger-maintained `Version` orders changes for the API's events.
+- `Jobs`: one row per job folder, and the job queue. State machine Queued, Running, Skipped, Throttled, Succeeded, Failed, Cancelled, plus head/base SHAs, config hash, agent, app version, decision, merge (what gate-merge got the platform to do), summary, error, retry time, not-before time, full and dry-run flags, a cancel request and the process running it. Failed and throttled runs are recorded too. A trigger-maintained `Version` orders changes for the API's events.
 - `Findings`: every finding the agent reported, in report order, with what the policy did with it (`inline`, `summary`, `already-posted`, `dropped`), whether it blocked, its fingerprint, and the job that resolved it.
 - `PullRequests`: each PR's last *published* review (head, base, job, commit patch-ids, per-file hashes). Dry runs don't move it, since nothing reached the PR.
 

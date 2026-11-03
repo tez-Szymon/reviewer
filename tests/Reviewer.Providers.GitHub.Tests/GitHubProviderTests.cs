@@ -15,6 +15,7 @@ public class GitHubProviderTests
 
     private const string PullJson = """
         {
+          "node_id": "PR_kw7",
           "title": "Fix totals",
           "body": "Rounds half up.",
           "head": { "sha": "abc123", "ref": "feature" },
@@ -317,6 +318,35 @@ public class GitHubProviderTests
         var body = Assert.Single(github.Requests).Body!.Value;
         Assert.Equal("squash", body.GetProperty("merge_method").GetString());
         Assert.Equal(Sha, body.GetProperty("sha").GetString());
+    }
+
+    [Fact]
+    public async Task Merge_WhenGreen_EnablesAutoMergeOnTheReviewedHead()
+    {
+        var github = new FakeGitHub()
+            .On($"GET {Pull}", PullJson)
+            .On("POST graphql", """{ "data": { "enablePullRequestAutoMerge": { "clientMutationId": null } } }""");
+
+        await github.Provider().MergeAsync(Pr, new MergeOptions(MergeMethod.Squash, Sha, WhenGreen: true), Ct);
+
+        var variables = github.Requests.Single(r => r.Route == "POST graphql").Body!.Value.GetProperty("variables");
+        Assert.Equal("PR_kw7", variables.GetProperty("pullRequestId").GetString());
+        Assert.Equal("SQUASH", variables.GetProperty("mergeMethod").GetString());
+        Assert.Equal(Sha, variables.GetProperty("expectedHeadOid").GetString());
+        Assert.DoesNotContain(github.Requests, r => r.Route == $"PUT {Pull}/merge");
+    }
+
+    [Fact]
+    public async Task Merge_WhenGreen_FailsWhereTheRepoDisallowsAutoMerge()
+    {
+        var github = new FakeGitHub()
+            .On($"GET {Pull}", PullJson)
+            .On("POST graphql", """{ "data": null, "errors": [{ "message": "Auto merge is not allowed for this repository" }] }""");
+
+        var error = await Assert.ThrowsAsync<GitHubApiException>(() =>
+            github.Provider().MergeAsync(Pr, new MergeOptions(MergeMethod.Squash, Sha, WhenGreen: true), Ct));
+
+        Assert.Contains("Auto merge is not allowed", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

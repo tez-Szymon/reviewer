@@ -114,7 +114,9 @@ public sealed record PolicyConfig(
         Review.BlockingRules,
         Review.IgnorePaths,
         Review.MaxInlineComments,
-        Review.RequestChangesFallback);
+        Review.RequestChangesFallback,
+        Merge.Method,
+        Merge.RequireGreenCi);
 }
 
 /// <summary>Which PRs the scheduler reviews and when it reviews them again.</summary>

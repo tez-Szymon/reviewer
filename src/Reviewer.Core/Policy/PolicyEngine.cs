@@ -98,13 +98,12 @@ public static class PolicyEngine
             reasons.Add($"Provider can't request changes: falling back to {policy.RequestChangesFallback}.");
         }
 
-        // 4. Merge guards. Required approvals are enforced by the platform when merging.
-        var merge = false;
+        // 4. Merge guards.
+        var merge = MergeIntent.None;
         if (policy.Mode == ReviewMode.GateMerge && decision == ReviewDecision.Approve)
         {
-            var failed = MergeGuardFailures(snapshot, scope).ToList();
-            merge = failed.Count == 0;
-            reasons.Add(merge ? "Merge guards passed." : $"Not merging: {string.Join("; ", failed)}.");
+            (merge, var reason) = DecideMerge(snapshot, policy, capabilities, scope);
+            reasons.Add(reason);
         }
 
         return new ReviewPlan(
@@ -123,26 +122,44 @@ public static class PolicyEngine
         };
     }
 
-    private static IEnumerable<string> MergeGuardFailures(PullRequestSnapshot snapshot, ReviewScope scope)
+    /// <summary>
+    /// Whether an approved PR can be merged now, once CI passes, or not at all. Required approvals are enforced by the
+    /// platform when merging, and the platform also refuses a head other than the reviewed one.
+    /// </summary>
+    public static (MergeIntent Intent, string Reason) DecideMerge(
+        PullRequestSnapshot snapshot, ReviewPolicy policy, ProviderCapabilities capabilities, ReviewScope scope)
     {
-        if (snapshot.Ci != CiState.Success)
-        {
-            yield return $"CI is {snapshot.Ci}";
-        }
-
-        if (!snapshot.IsMergeable)
-        {
-            yield return "PR is not mergeable";
-        }
-
+        var failed = new List<string>();
         if (snapshot.IsDraft)
         {
-            yield return "PR is a draft";
+            failed.Add("PR is a draft");
         }
 
         if (!string.Equals(snapshot.HeadSha, scope.ReviewedHeadSha, StringComparison.OrdinalIgnoreCase))
         {
-            yield return "head moved since review";
+            failed.Add("head moved since review");
         }
+
+        if (!snapshot.IsMergeable)
+        {
+            failed.Add("PR is not mergeable");
+        }
+
+        var waitForCi = false;
+        if (policy.RequireGreenCi && snapshot.Ci != CiState.Success)
+        {
+            if (snapshot.Ci == CiState.Pending && capabilities.SupportsMergeWhenGreen)
+            {
+                waitForCi = true;
+            }
+            else
+            {
+                failed.Add(snapshot.Ci == CiState.Unknown ? "no CI ran" : $"CI is {snapshot.Ci}");
+            }
+        }
+
+        return failed.Count > 0 ? (MergeIntent.None, $"Not merging: {string.Join("; ", failed)}.")
+            : waitForCi ? (MergeIntent.MergeWhenGreen, "Merge guards passed but CI is running: merge when it passes.")
+            : (MergeIntent.Merge, "Merge guards passed.");
     }
 }

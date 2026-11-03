@@ -9,6 +9,7 @@ internal sealed record BranchDto(string Sha, string Ref);
 
 internal sealed record PullRequestDto(
     int Number,
+    string? NodeId,
     string? Title,
     string? Body,
     BranchDto Head,
@@ -46,6 +47,8 @@ internal sealed record GraphQlRequest(string Query, object Variables);
 internal sealed record GraphQlResponse<T>(T? Data, IReadOnlyList<GraphQlError>? Errors);
 
 internal sealed record GraphQlError(string Message);
+
+internal sealed record AutoMergeData(object? EnablePullRequestAutoMerge);
 
 internal sealed record ThreadsData(ThreadsRepository? Repository);
 

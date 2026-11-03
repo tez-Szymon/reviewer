@@ -13,7 +13,13 @@ internal sealed class FakeProvider(PullRequestSnapshot snapshot) : IRepositoryPr
 
     public Task<string> GetCurrentUserAsync(CancellationToken ct) => Task.FromResult("bob");
 
-    public Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct) => Task.FromResult(Snapshot);
+    /// <summary>What every read after the first returns, as when the PR changes while the agent reviews it.</summary>
+    public PullRequestSnapshot? Refreshed { get; set; }
+
+    private int _snapshotReads;
+
+    public Task<PullRequestSnapshot> GetSnapshotAsync(PullRequestRef pr, CancellationToken ct) =>
+        Task.FromResult(_snapshotReads++ > 0 && Refreshed is { } refreshed ? refreshed : Snapshot);
 
     public Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct)
     {
@@ -75,6 +81,19 @@ internal sealed class FakeProvider(PullRequestSnapshot snapshot) : IRepositoryPr
     public Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(PullRequestRef pr, CancellationToken ct) =>
         Task.FromResult(ChangedFiles.GetValueOrDefault(pr.Number) ?? [new ChangedFile("src/a.cs", 10, 2)]);
 
+    public List<MergeOptions> Merges { get; } = [];
 
-    public Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct) => throw new NotSupportedException();
+    /// <summary>Thrown by <see cref="MergeAsync"/>, as when the platform refuses the merge.</summary>
+    public Exception? MergeError { get; set; }
+
+    public Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct)
+    {
+        if (MergeError is { } error)
+        {
+            throw error;
+        }
+
+        Merges.Add(options);
+        return Task.CompletedTask;
+    }
 }

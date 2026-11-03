@@ -30,7 +30,7 @@ public sealed class ReviewStoreTests : IDisposable
     {
         var snapshot = new PullRequestSnapshot(Pr, "t", "", head, "base1", "main", "alice", [], [], [], false, CiState.Success, true);
         var plan = new ReviewPlan("s", findings.Take(1).ToList(), findings.Skip(1).Take(1).ToList(), [.. findings.Take(1).Select(f => f.Id)], [],
-            ReviewDecision.Approve, Merge: false, UnresolvedThreads: false, []);
+            ReviewDecision.Approve, MergeIntent.None, UnresolvedThreads: false, []);
         return new ReviewOutcome(
             jobId, "/tmp/attempt", snapshot, new ReviewDelta(DeltaKind.Full, "base1", null, "First."), new FindingsReport("Summary.", findings), plan, published);
     }

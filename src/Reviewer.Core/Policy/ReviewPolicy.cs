@@ -21,6 +21,18 @@ public enum RequestChangesFallback
     Comment,
 }
 
+/// <summary>What gate-merge does after approving.</summary>
+public enum MergeIntent
+{
+    None,
+
+    /// <summary>Merge now: every guard passed.</summary>
+    Merge,
+
+    /// <summary>CI is still running: let the platform merge the reviewed head once it passes.</summary>
+    MergeWhenGreen,
+}
+
 /// <summary>A finding is blocking when it matches every condition the rule sets.</summary>
 public sealed record BlockingRule(
     Severity MinSeverity,
@@ -40,12 +52,15 @@ public sealed record ReviewPolicy(
     IReadOnlyList<BlockingRule> BlockingRules,
     IReadOnlyList<string> IgnorePaths,
     int MaxInlineComments,
-    RequestChangesFallback RequestChangesFallback = RequestChangesFallback.UnresolvedThreads);
+    RequestChangesFallback RequestChangesFallback = RequestChangesFallback.UnresolvedThreads,
+    MergeMethod MergeMethod = MergeMethod.Squash,
+    bool RequireGreenCi = true);
 
 /// <summary>What the publisher will do. Produced only by the policy engine, never by the model.</summary>
 /// <param name="InlineFindings">Findings posted as inline comments, most important first.</param>
 /// <param name="SummaryFindings">Kept findings listed in the summary only: outside the delta or over the inline limit.</param>
 /// <param name="BlockingFindingIds">Ids of kept findings that matched a blocking rule.</param>
+/// <param name="Merge">What to do after approving; gate-merge only.</param>
 /// <param name="UnresolvedThreads">Post blocking inline findings as unresolved threads (request-changes fallback).</param>
 /// <param name="Reasons">Why the engine decided as it did, for history and dry runs.</param>
 public sealed record ReviewPlan(
@@ -55,7 +70,7 @@ public sealed record ReviewPlan(
     IReadOnlyList<string> BlockingFindingIds,
     IReadOnlyList<PublishedComment> CommentsToResolve,
     ReviewDecision Decision,
-    bool Merge,
+    MergeIntent Merge,
     bool UnresolvedThreads,
     IReadOnlyList<string> Reasons)
 {

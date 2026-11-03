@@ -360,11 +360,6 @@ public static partial class ConfigLoader
         }
 
         var review = policy.Review;
-        if (review.Mode == ReviewMode.GateMerge)
-        {
-            errors.Add(("review.mode", "gate-merge arrives in M3, with the merge guards."));
-        }
-
         if (review.MinConfidence is < 0 or > 1)
         {
             errors.Add(("review.minConfidence", "must be between 0 and 1."));
