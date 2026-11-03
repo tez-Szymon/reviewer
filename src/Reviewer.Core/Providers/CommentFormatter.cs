@@ -4,27 +4,32 @@ using System.Text.RegularExpressions;
 using Reviewer.Core.Findings;
 using Reviewer.Core.Providers;
 
-namespace Reviewer.Providers.GitHub;
+namespace Reviewer.Core.Providers;
 
 /// <summary>
-/// Renders findings as GitHub Markdown. Finding text comes from a model that read untrusted PR content, so it is
-/// defused: no @-mentions that would ping people, and no HTML comments that could fake our fingerprint marker.
+/// Renders findings as Markdown for GitHub and GitLab alike. Finding text comes from a model that read untrusted PR
+/// content, so it is defused: no @-mentions that would ping people, and no HTML comments that could fake our
+/// fingerprint marker, which both platforms hide.
 /// </summary>
-internal static partial class CommentFormatter
+public static partial class CommentFormatter
 {
     public const int MaxBodyLength = 65_000;
 
-    public static string InlineBody(InlineComment comment, bool withSuggestion)
+    /// <param name="suggestionInfo">
+    /// The fence's info string for the platform's suggestion block, e.g. <c>suggestion</c> on GitHub or
+    /// <c>suggestion:-2+0</c> on GitLab; null leaves the suggestion out.
+    /// </param>
+    public static string InlineBody(InlineComment comment, string? suggestionInfo)
     {
         var f = comment.Finding;
         var body = new StringBuilder()
             .Append(CultureInfo.InvariantCulture, $"**{Label(f.Severity)} · {Label(f.Category)}**: {Defuse(f.Title)}\n\n")
             .Append(Defuse(f.Body));
 
-        if (withSuggestion && f.Suggestion is { } suggestion)
+        if (suggestionInfo is not null && f.Suggestion is { } suggestion)
         {
             var fence = new string('`', Math.Max(3, LongestBacktickRun(suggestion) + 1));
-            body.Append(CultureInfo.InvariantCulture, $"\n\n{fence}suggestion\n{suggestion.TrimEnd('\n')}\n{fence}");
+            body.Append(CultureInfo.InvariantCulture, $"\n\n{fence}{suggestionInfo}\n{suggestion.TrimEnd('\n')}\n{fence}");
         }
 
         return body.Append('\n').Append(Marker(comment.Fingerprint)).ToString();

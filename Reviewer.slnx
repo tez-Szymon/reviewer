@@ -8,6 +8,7 @@
     <Project Path="src/Reviewer.Git/Reviewer.Git.csproj" />
     <Project Path="src/Reviewer.Instructions/Reviewer.Instructions.csproj" />
     <Project Path="src/Reviewer.Providers.GitHub/Reviewer.Providers.GitHub.csproj" />
+    <Project Path="src/Reviewer.Providers.GitLab/Reviewer.Providers.GitLab.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Reviewer.Agents.Cli.Tests/Reviewer.Agents.Cli.Tests.csproj" />
@@ -18,5 +19,6 @@
     <Project Path="tests/Reviewer.Git.Tests/Reviewer.Git.Tests.csproj" />
     <Project Path="tests/Reviewer.Instructions.Tests/Reviewer.Instructions.Tests.csproj" />
     <Project Path="tests/Reviewer.Providers.GitHub.Tests/Reviewer.Providers.GitHub.Tests.csproj" />
+    <Project Path="tests/Reviewer.Providers.GitLab.Tests/Reviewer.Providers.GitLab.Tests.csproj" />
   </Folder>
 </Solution>

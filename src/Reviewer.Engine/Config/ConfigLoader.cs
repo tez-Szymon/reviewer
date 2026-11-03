@@ -34,6 +34,7 @@ public static partial class ConfigLoader
     };
 
     private static readonly Uri GitHubHost = new("https://github.com");
+    private static readonly Uri GitLabHost = new("https://gitlab.com");
 
     /// <summary>Loads <paramref name="path"/>; a missing file means the built-in defaults.</summary>
     /// <exception cref="ConfigException">The file is invalid.</exception>
@@ -66,7 +67,7 @@ public static partial class ConfigLoader
         }
 
         var accounts = file.Accounts.Count > 0
-            ? file.Accounts.Select(a => new AccountConfig(a.Id, a.Provider, a.Host ?? GitHubHost, a.Token)).ToList()
+            ? file.Accounts.Select(a => new AccountConfig(a.Id, a.Provider, a.Host ?? (a.Provider == AccountConfig.GitLab ? GitLabHost : GitHubHost), a.Token)).ToList()
             : [new AccountConfig("github", "github", GitHubHost, null)];
         ValidateAccounts(accounts, errors);
         ValidateAgents(file.Agents, errors);
@@ -242,8 +243,12 @@ public static partial class ConfigLoader
                     break;
                 case "github":
                     break;
+                // Self-hosted GitLab may be served from a path; the token must never go over plain HTTP.
+                case "gitlab" when !account.Host.IsAbsoluteUri || account.Host.Scheme != Uri.UriSchemeHttps
+                    || account.Host.Query.Length > 0 || account.Host.Fragment.Length > 0:
+                    errors.Add($"{path}.host", "must be an https:// URL such as https://gitlab.com or https://git.example.com/gitlab.");
+                    break;
                 case "gitlab":
-                    errors.Add($"{path}.provider", "GitLab support arrives in M3.");
                     break;
                 default:
                     errors.Add($"{path}.provider", "must be github or gitlab.");
@@ -284,7 +289,16 @@ public static partial class ConfigLoader
 
     private static void ValidateRepo(RepoEntry entry, string path, List<AccountConfig> accounts, IEnumerable<RepoEntry> earlier, Errors errors)
     {
-        if (!RepoName().IsMatch(entry.Repo))
+        var account = entry.Account is null ? (accounts.Count == 1 ? accounts[0] : null) : accounts.FirstOrDefault(a => a.Id == entry.Account);
+        if (account?.Provider == AccountConfig.GitLab)
+        {
+            // GitLab groups nest: group/subgroup/project.
+            if (!GitLabRepoName().IsMatch(entry.Repo))
+            {
+                errors.Add($"{path}.repo", "must be group/project, with any subgroups between.");
+            }
+        }
+        else if (!RepoName().IsMatch(entry.Repo))
         {
             errors.Add($"{path}.repo", "must be owner/name.");
         }
@@ -386,6 +400,9 @@ public static partial class ConfigLoader
 
     [GeneratedRegex(@"^[^/\s]+/[^/\s]+$")]
     private static partial Regex RepoName();
+
+    [GeneratedRegex(@"^[^/\s]+(/[^/\s]+)+$")]
+    private static partial Regex GitLabRepoName();
 
     /// <summary>Collects messages as <c>file:line: path: message</c>, with the line of the nearest key the user wrote.</summary>
     private sealed class Errors(string source, IReadOnlyDictionary<string, int> lines)

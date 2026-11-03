@@ -242,6 +242,7 @@ public class PolicyEngineTests
 
         Assert.Equal(ReviewDecision.None, plan.Decision);
         Assert.Equal(unresolvedThreads, plan.UnresolvedThreads);
+        Assert.True(plan.WithdrawApproval);
     }
 
     [Fact]
@@ -250,6 +251,16 @@ public class PolicyEngineTests
         var plan = Decide([Blocker]);
 
         Assert.False(plan.UnresolvedThreads);
+        Assert.False(plan.WithdrawApproval);
+    }
+
+    [Fact]
+    public void Decide_KeepsApprovalWhenNothingBlocks_EvenWithoutRequestChanges()
+    {
+        var plan = Decide([], capabilities: NoRequestChanges);
+
+        Assert.Equal(ReviewDecision.Approve, plan.Decision);
+        Assert.False(plan.WithdrawApproval);
     }
 
     public static TheoryData<PullRequestSnapshot, string> FailingGuards => new()

@@ -126,6 +126,18 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task QueueReview_ForAGitLabMergeRequest_UsesTheAccountsHost()
+    {
+        await File.WriteAllTextAsync(_paths.Config, "accounts: [{ id: work, provider: gitlab, host: https://git.acme.test/gitlab }]\n", Ct);
+
+        using var response = await PostAsync("jobs", new QueueRequest("https://git.acme.test/gitlab/acme/platform/api/-/merge_requests/12"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var job = Assert.Single((await Http.GetFromJsonAsync<List<JobDto>>("queue", ApiJson.Options, Ct))!);
+        Assert.Equal(("https://git.acme.test", "acme/platform/api", 12), (job.Host, job.Repo, job.Number));
+    }
+
+    [Fact]
     public async Task QueueReview_WithAnInvalidConfig_ListsItsErrors()
     {
         await File.WriteAllTextAsync(_paths.Config, "defaults:\n  review: { mode: nope }\n", Ct);

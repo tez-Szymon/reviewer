@@ -75,6 +75,21 @@ public sealed class ReviewRunnerTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(outcome.AttemptFolder!)!, "worktree-1")));
     }
 
+    [Theory]
+    [InlineData(true, ReviewDecision.RequestChanges, false)]
+    [InlineData(false, ReviewDecision.None, true)]
+    public async Task Run_GateWithABlocker_WithdrawsApproval_WhereTheProviderCantRequestChanges(
+        bool requestChanges, ReviewDecision decision, bool withdraw)
+    {
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("Broken.", [Finding("in", 2, Severity.Blocker)]));
+        provider.Capabilities = provider.Capabilities with { SupportsRequestChanges = requestChanges };
+
+        await runner.RunAsync(request with { Policy = request.Policy with { Mode = Core.Policy.ReviewMode.Gate } }, Ct);
+
+        var published = Assert.Single(provider.Published);
+        Assert.Equal((decision, withdraw), (published.Decision, published.WithdrawApproval));
+    }
+
     [Fact]
     public async Task Run_FingerprintsSymlinkByItsTarget_NeverReadingThroughIt()
     {

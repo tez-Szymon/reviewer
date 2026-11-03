@@ -182,7 +182,7 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
         };
         var comments = result.Comments.Select(c => new ReviewCommentRequest(
             c.Finding.File,
-            CommentFormatter.InlineBody(c, Capabilities.SupportsSuggestions),
+            CommentFormatter.InlineBody(c, "suggestion"),
             c.Finding.EndLine,
             "RIGHT",
             c.Finding.StartLine < c.Finding.EndLine ? c.Finding.StartLine : null,

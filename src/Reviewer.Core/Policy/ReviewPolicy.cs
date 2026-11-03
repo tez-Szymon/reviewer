@@ -64,4 +64,7 @@ public sealed record ReviewPlan(
 
     /// <summary>Kept findings left out of this review's comments because the PR already has them.</summary>
     public IReadOnlyList<Finding> AlreadyPosted { get; init; } = [];
+
+    /// <summary>Changes were wanted but the provider can't request them: withdraw any approval this account gave earlier.</summary>
+    public bool WithdrawApproval { get; init; }
 }

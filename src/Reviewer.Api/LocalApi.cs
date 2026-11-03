@@ -144,17 +144,16 @@ public static class LocalApi
         api.MapPost("/jobs", async Task<Results<Created<QueueResult>, Ok<QueueResult>, ProblemHttpResult>> (
             QueueRequest request, CancellationToken ct) =>
         {
-            if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var url) || !GitHubUrls.TryParsePullRequest(url, out var pr))
-            {
-                return TypedResults.Problem(
-                    "Only github.com pull request URLs are supported: https://github.com/<owner>/<repo>/pull/<number>.",
-                    statusCode: StatusCodes.Status400BadRequest);
-            }
-
             EnqueueResult result;
             try
             {
+                // The accounts say which hosts are GitLab, so the URL is read with the config.
                 var config = await ConfigLoader.LoadAsync(engine.Paths.Config, ct).ConfigureAwait(false);
+                if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var url) || !PullRequestUrls.TryParse(url, config, out var pr))
+                {
+                    return TypedResults.Problem(PullRequestUrls.Expected, statusCode: StatusCodes.Status400BadRequest);
+                }
+
                 result = await ManualReview.QueueAsync(store, config, pr, request.Agent, request.DryRun, request.Full, engine.Time, ct)
                     .ConfigureAwait(false);
             }
@@ -215,7 +214,7 @@ public static class LocalApi
                 return TypedResults.Problem($"'{host}' is not a host URL.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            var pr = new PullRequestRef(new RepoRef(hostUri, owner, repo), number);
+            var pr = new PullRequestRef(new RepoRef(hostUri, Uri.UnescapeDataString(owner), repo), number);
             var record = await store.GetPullRequestAsync(pr, ct).ConfigureAwait(false);
             var open = await store.GetOpenFindingsAsync(pr, ct).ConfigureAwait(false);
             var jobs = await store.ListJobsAsync(pr.Repo.ToString(), 50, ct, number).ConfigureAwait(false);
@@ -227,7 +226,7 @@ public static class LocalApi
                 [.. open.Select(f => new OpenFindingDto(f.Finding, f.Fingerprint, f.HeadSha, f.Blocking))],
                 [.. jobs.Where(j => string.Equals(j.Job.Host, ReviewStore.Host(pr.Repo), StringComparison.OrdinalIgnoreCase))
                     .Select(JobSummaryDto.From)]));
-        }).WithSummary("A PR's last published review, its open findings and its jobs; host defaults to https://github.com");
+        }).WithSummary("A PR's last published review, its open findings and its jobs; host defaults to https://github.com, and a GitLab subgroup path is one escaped owner segment");
 
         api.MapGet("/config", async Task<Results<JsonHttpResult<ReviewerConfig>, ProblemHttpResult>> (CancellationToken ct) =>
         {
@@ -252,7 +251,7 @@ public static class LocalApi
             try
             {
                 var config = await ConfigLoader.LoadAsync(engine.Paths.Config, ct).ConfigureAwait(false);
-                return TypedResults.Json(config.For(new RepoRef(hostUri, owner, repo)), ConfigLoader.JsonOptions);
+                return TypedResults.Json(config.For(new RepoRef(hostUri, Uri.UnescapeDataString(owner), repo)), ConfigLoader.JsonOptions);
             }
             catch (ConfigException e)
             {

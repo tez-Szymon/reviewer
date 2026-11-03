@@ -48,24 +48,27 @@ public sealed record ReviewerConfig(
 
     /// <summary>The repos with an entry, which <c>reviewer serve</c> polls; each on its account's host.</summary>
     public IEnumerable<RepoRef> WatchedRepos() => Repos.Select(r =>
-    {
-        var parts = r.Repo.Split('/'); // Validated as owner/name.
-        return new RepoRef(Account(r.Account).Host, parts[0], parts[1]);
-    });
+        // Validated as owner/name, or a GitLab project's full path.
+        RepoRef.TryParse(Account(r.Account).Host, r.Repo, out var repo) ? repo : throw new InvalidOperationException($"'{r.Repo}' is not a repo path."));
 
     // Validation guarantees that a named account exists and that an unnamed one is unambiguous.
     private AccountConfig Account(string? id) => id is null ? Accounts[0] : Accounts.First(a => a.Id == id);
 
     /// <summary>Same scheme, host and port: what decides which account a PR URL belongs to.</summary>
-    internal static bool SameHost(Uri a, Uri b) => Uri.Compare(a, b, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
+    public static bool SameHost(Uri a, Uri b) => Uri.Compare(a, b, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
 }
 
 /// <param name="Token">
 /// A reference to the token, never the token itself: <c>env:NAME</c> reads an environment variable and
 /// <c>keychain:SERVICE/ACCOUNT</c> an item in the OS credential store (see <see cref="TokenReference"/>). Null falls back to
-/// <c>GITHUB_TOKEN</c>, <c>GH_TOKEN</c> and the GitHub CLI's login.
+/// <c>GITHUB_TOKEN</c>, <c>GH_TOKEN</c> and the GitHub CLI's login on GitHub, and to <c>GITLAB_TOKEN</c> on GitLab.
 /// </param>
-public sealed record AccountConfig(string Id, string Provider, Uri Host, string? Token);
+/// <param name="Host">The instance's URL; a self-hosted GitLab's may carry the path it's served from.</param>
+public sealed record AccountConfig(string Id, string Provider, Uri Host, string? Token)
+{
+    public const string GitHub = "github";
+    public const string GitLab = "gitlab";
+}
 
 public sealed record AgentsConfig(
     string Default,

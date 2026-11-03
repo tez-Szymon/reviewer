@@ -12,7 +12,6 @@ using Reviewer.Engine;
 using Reviewer.Engine.Config;
 using Reviewer.Engine.State;
 using Reviewer.Git;
-using Reviewer.Providers.GitHub;
 
 var prUrl = PrUrlArgument();
 var dryRun = new Option<bool>("--dry-run") { Description = "Show the review plan without publishing it" };
@@ -44,14 +43,15 @@ var configJson = new JsonSerializerOptions(ConfigLoader.JsonOptions) { WriteInde
 var review = new Command("review", "Review one pull request now") { prUrl, dryRun, full, agent, model, minConfidence };
 review.SetAction(async (parse, ct) =>
 {
-    if (!GitHubUrls.TryParsePullRequest(parse.GetValue(prUrl)!, out var pr))
-    {
-        return Fail("Only github.com pull request URLs are supported: https://github.com/<owner>/<repo>/pull/<number>.");
-    }
-
     if (await LoadConfigAsync(paths, ct) is not { } config)
     {
         return 1;
+    }
+
+    // The accounts say which hosts are GitLab, so the URL is read with the config.
+    if (!PullRequestUrls.TryParse(parse.GetValue(prUrl)!, config, out var pr))
+    {
+        return Fail(PullRequestUrls.Expected);
     }
 
     EffectiveConfig effective;
@@ -91,7 +91,7 @@ review.SetAction(async (parse, ct) =>
     {
         return Fail(e.RetryAt is { } at ? $"{e.Message}\nTry again after {at.ToLocalTime():g}." : e.Message);
     }
-    catch (Exception e) when (e is AgentException or GitException or GitHubApiException or HttpRequestException)
+    catch (Exception e) when (e is AgentException or GitException or ProviderApiException or HttpRequestException)
     {
         return Fail(e.Message);
     }
@@ -148,7 +148,7 @@ showJob.SetAction(async (parse, ct) =>
     }
 });
 
-var status = new Command("status", "Show agent health and the GitHub account in use");
+var status = new Command("status", "Show agent health and each account's sign-in");
 status.SetAction(async (_, ct) =>
 {
     var health = await new ClaudeCodeAgent(new ClaudeCodeOptions(), runner).CheckAsync(ct);
@@ -167,32 +167,14 @@ status.SetAction(async (_, ct) =>
         Console.WriteLine($"config: {paths.Config} is invalid ({e.Errors.Count} errors); run 'reviewer config validate'.");
     }
 
-    var account = (config ?? ReviewerConfig.Default).Accounts[0];
-    var github = "github.com: " + GitHubToken.Missing(account);
-    string? token = null;
-    try
+    var signedIn = true;
+    foreach (var account in (config ?? ReviewerConfig.Default).Accounts)
     {
-        token = await GitHubToken.ResolveAsync(runner, account, ct);
-    }
-    catch (KeychainException e)
-    {
-        github = "github.com: " + e.Message;
+        var line = await AccountStatusAsync(account, ct);
+        signedIn &= line.SignedIn;
+        Console.WriteLine($"{account.Host.Host} ({account.Id}): {line.Text}");
     }
 
-    if (token is not null)
-    {
-        using var http = GitHubProvider.CreateHttpClient(token);
-        try
-        {
-            github = $"github.com: signed in as {await new GitHubProvider(http).GetCurrentUserAsync(ct)}";
-        }
-        catch (Exception e) when (e is GitHubApiException or HttpRequestException)
-        {
-            github = $"github.com: token rejected. {e.Message}";
-        }
-    }
-
-    Console.WriteLine(github);
     using (var client = new EngineClient(paths.Socket))
     {
         Console.WriteLine(await client.GetStatusAsync(ct) is { } engine
@@ -201,7 +183,7 @@ status.SetAction(async (_, ct) =>
     }
 
     Console.WriteLine($"data: {paths.Root}");
-    return health.IsReady && config is not null && github.Contains("signed in", StringComparison.Ordinal) ? 0 : 1;
+    return health.IsReady && config is not null && signedIn ? 0 : 1;
 });
 
 var validate = new Command("validate", "Check config.yaml and list any problems");
@@ -218,7 +200,7 @@ validate.SetAction(async (_, ct) =>
     return 0;
 });
 
-var repoName = new Argument<string?>("repo") { Description = "owner/name on github.com; omit for the whole config", Arity = ArgumentArity.ZeroOrOne };
+var repoName = new Argument<string?>("repo") { Description = "owner/name, or a GitLab project's full path; omit for the whole config", Arity = ArgumentArity.ZeroOrOne };
 var show = new Command("show", "Print the config after defaults and overrides are merged") { repoName };
 show.SetAction(async (parse, ct) =>
 {
@@ -233,14 +215,17 @@ show.SetAction(async (parse, ct) =>
         return 0;
     }
 
-    if (name.Split('/') is not [{ Length: > 0 } owner, { Length: > 0 } repo])
+    // A repo with an entry is shown on its account's host; any other on the first account's.
+    var host = config.WatchedRepos().FirstOrDefault(r => string.Equals(r.ToString(), name, StringComparison.OrdinalIgnoreCase))?.Host
+        ?? config.Accounts[0].Host;
+    if (!RepoRef.TryParse(host, name, out var shown))
     {
-        return Fail($"'{name}' is not owner/name.");
+        return Fail($"'{name}' is not owner/name, or a GitLab project's full path.");
     }
 
     try
     {
-        Console.WriteLine(JsonSerializer.Serialize(config.For(new RepoRef(new Uri("https://github.com"), owner, repo)), configJson));
+        Console.WriteLine(JsonSerializer.Serialize(config.For(shown), configJson));
         return 0;
     }
     catch (ConfigException e)
@@ -258,14 +243,14 @@ var addAgent = new Option<string?>("--agent") { Description = "Agent to use inst
 var queueAdd = new Command("add", "Queue a review for the engine ('reviewer serve') to run") { addUrl, addDryRun, addFull, addAgent };
 queueAdd.SetAction(async (parse, ct) =>
 {
-    if (!GitHubUrls.TryParsePullRequest(parse.GetValue(addUrl)!, out var pr))
-    {
-        return Fail("Only github.com pull request URLs are supported: https://github.com/<owner>/<repo>/pull/<number>.");
-    }
-
     if (await LoadConfigAsync(paths, ct) is not { } config)
     {
         return 1;
+    }
+
+    if (!PullRequestUrls.TryParse(parse.GetValue(addUrl)!, config, out var pr))
+    {
+        return Fail(PullRequestUrls.Expected);
     }
 
     try
@@ -456,6 +441,24 @@ var root = new RootCommand("Local-first AI code reviewer") { review, queue, serv
 
 // Stopping the engine cancels running reviews and queues them again; give that time before the process is ended.
 return await root.Parse(args).InvokeAsync(new InvocationConfiguration { ProcessTerminationTimeout = TimeSpan.FromSeconds(30) });
+
+// Signs in with the account's token, so a wrong or expired token shows here rather than in the first review.
+async Task<(bool SignedIn, string Text)> AccountStatusAsync(AccountConfig account, CancellationToken ct)
+{
+    try
+    {
+        using var connection = await AccountConnection.OpenAsync(runner, account, ct);
+        return (true, $"signed in as {await connection.Provider.GetCurrentUserAsync(ct)}");
+    }
+    catch (InvalidOperationException e)
+    {
+        return (false, e.Message);
+    }
+    catch (Exception e) when (e is ProviderApiException or HttpRequestException)
+    {
+        return (false, $"token rejected. {e.Message}");
+    }
+}
 
 static Argument<Uri> PrUrlArgument() => new("pr-url")
 {

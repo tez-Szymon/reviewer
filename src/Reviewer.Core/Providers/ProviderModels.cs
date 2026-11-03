@@ -2,9 +2,23 @@ using Reviewer.Core.Findings;
 
 namespace Reviewer.Core.Providers;
 
+/// <param name="Owner">The user or organization on GitHub; on GitLab the group path, which can nest (<c>group/subgroup</c>).</param>
 public sealed record RepoRef(Uri Host, string Owner, string Name)
 {
     public override string ToString() => $"{Owner}/{Name}";
+
+    /// <summary>
+    /// Splits a full path such as <c>acme/api</c> or <c>acme/platform/api</c> at its last slash: everything before it
+    /// is the owner. False when there's no owner or name.
+    /// </summary>
+    public static bool TryParse(Uri host, string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RepoRef? repo)
+    {
+        var slash = path.LastIndexOf('/');
+        repo = slash > 0 && slash < path.Length - 1 && !path.Split('/').Any(string.IsNullOrWhiteSpace)
+            ? new RepoRef(host, path[..slash], path[(slash + 1)..])
+            : null;
+        return repo is not null;
+    }
 }
 
 public sealed record PullRequestRef(RepoRef Repo, int Number);
@@ -77,7 +91,14 @@ public sealed record ReviewResult(
     IReadOnlyList<InlineComment> Comments,
     IReadOnlyList<Finding> SummaryFindings,
     ReviewDecision Decision,
-    string HeadSha);
+    string HeadSha)
+{
+    /// <summary>
+    /// The policy wanted to request changes, which the provider can't: an approval this account gave earlier must be
+    /// withdrawn, or it would still stand for the blocked head.
+    /// </summary>
+    public bool WithdrawApproval { get; init; }
+}
 
 public enum ReviewDecision
 {
