@@ -9,16 +9,11 @@ public static class ManualReview
 {
     /// <summary>Queues a review of <paramref name="pr"/> to start now, or merges it into one already queued.</summary>
     /// <param name="agent">An agent to use instead of the configured one; its own settings apply.</param>
-    /// <exception cref="ConfigException">The config has no account for the PR, or the agent isn't available.</exception>
+    /// <exception cref="ConfigException">The config has no account for the PR, or the agent is unknown.</exception>
     public static async Task<EnqueueResult> QueueAsync(
         ReviewStore store, ReviewerConfig config, PullRequestRef pr, string? agent, bool dryRun, bool full, TimeProvider time, CancellationToken ct)
     {
         var effective = config.For(pr.Repo, agent);
-        if (effective.AgentId != AgentsConfig.ClaudeCodeId)
-        {
-            throw new ConfigException([$"Agent '{effective.AgentId}' is not available yet; use claude-code."]);
-        }
-
         return await store.EnqueueAsync(
             new JobRecord
             {

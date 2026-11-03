@@ -151,10 +151,19 @@ showJob.SetAction(async (parse, ct) =>
 var status = new Command("status", "Show agent health and each account's sign-in");
 status.SetAction(async (_, ct) =>
 {
-    var health = await new ClaudeCodeAgent(new ClaudeCodeOptions(), runner).CheckAsync(ct);
-    Console.WriteLine(health.IsReady
-        ? $"claude-code: ready ({health.Version})"
-        : $"claude-code: not ready. {health.Problem}");
+    var ready = new HashSet<string>();
+    foreach (var id in AgentsConfig.Known)
+    {
+        var health = await ReviewFactory.Agent(id, null, runner).CheckAsync(ct);
+        if (health.IsReady)
+        {
+            ready.Add(id);
+        }
+
+        Console.WriteLine(health.IsReady
+            ? $"{id}: ready ({health.Version})"
+            : $"{id}: not ready. {health.Problem}");
+    }
 
     ReviewerConfig? config = null;
     try
@@ -183,7 +192,9 @@ status.SetAction(async (_, ct) =>
     }
 
     Console.WriteLine($"data: {paths.Root}");
-    return health.IsReady && config is not null && signedIn ? 0 : 1;
+    // Only the agents the config uses have to be ready.
+    var used = config is null ? [] : config.Repos.Select(r => r.Agent ?? config.Agents.Default).Append(config.Agents.Default);
+    return config is not null && used.All(ready.Contains) && signedIn ? 0 : 1;
 });
 
 var validate = new Command("validate", "Check config.yaml and list any problems");
@@ -368,7 +379,7 @@ serve.SetAction(async (_, ct) =>
             using var source = new PollSource(paths, runner);
             var scheduler = new Scheduler(store, source, TimeProvider.System, worker.Wake, Log);
             var api = await StartApiAsync(
-                new EngineServices(paths, store, [new ClaudeCodeAgent(new ClaudeCodeOptions(), runner)], worker.Wake, TimeProvider.System, DateTimeOffset.UtcNow),
+                new EngineServices(paths, store, [.. AgentsConfig.Known.Select(id => ReviewFactory.Agent(id, null, runner))], worker.Wake, TimeProvider.System, DateTimeOffset.UtcNow),
                 ct);
             Log($"Engine started on {paths.Root}, watching {config.Repos.Count} repo(s); Ctrl+C stops it.");
             try
