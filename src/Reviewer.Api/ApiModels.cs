@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Reviewer.Core.Findings;
+using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
 using Reviewer.Engine.State;
@@ -29,6 +30,7 @@ public sealed record JobDto(
     bool Full,
     bool Published,
     ReviewDecision? Decision,
+    MergeIntent? Merge,
     string? HeadSha,
     string? BaseSha,
     DeltaKind? Delta,
@@ -46,7 +48,7 @@ public sealed record JobDto(
     long Version)
 {
     public static JobDto From(JobRecord j) => new(
-        j.Id, j.Host, j.Repo, j.Number, j.State, j.AgentId, j.DryRun, j.Full, j.Published, j.Decision, j.HeadSha, j.BaseSha,
+        j.Id, j.Host, j.Repo, j.Number, j.State, j.AgentId, j.DryRun, j.Full, j.Published, j.Decision, j.Merge, j.HeadSha, j.BaseSha,
         j.Delta, j.DeltaFrom, j.Summary, j.Error, j.CreatedAt, j.StartedAt, j.FinishedAt, j.RetryAt, j.NotBefore,
         j.CancelRequested, j.RunnerPid, j.AttemptFolder, j.Version);
 }

@@ -42,6 +42,14 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
         }
         """;
 
+    private const string AutoMergeMutation = """
+        mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!, $expectedHeadOid: GitObjectID!) {
+          enablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId, mergeMethod: $mergeMethod, expectedHeadOid: $expectedHeadOid }) {
+            clientMutationId
+          }
+        }
+        """;
+
     private static readonly HashSet<string> FailedConclusions = ["failure", "cancelled", "timed_out", "action_required", "stale"];
 
     private readonly HttpClient _http = http;
@@ -51,7 +59,7 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
         SupportsRequestChanges: true,
         SupportsThreadResolve: true,
         SupportsSuggestions: true,
-        SupportsMergeWhenGreen: false);
+        SupportsMergeWhenGreen: true);
 
     /// <summary>An <see cref="HttpClient"/> for github.com with the headers the REST API expects.</summary>
     public static HttpClient CreateHttpClient(string token, HttpMessageHandler? handler = null)
@@ -272,6 +280,18 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
 
     public async Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct)
     {
+        if (options.WhenGreen)
+        {
+            // Auto-merge waits for the checks branch protection requires, and needs "Allow auto-merge" on the repo.
+            var dto = await GetAsync<PullRequestDto>(PullPath(pr), ct).ConfigureAwait(false);
+            var id = dto.NodeId ?? throw new GitHubApiException(HttpStatusCode.NotFound, $"Pull request {pr.Repo}#{pr.Number} has no node id.");
+            await GraphQlAsync<AutoMergeData>(
+                AutoMergeMutation,
+                new { pullRequestId = id, mergeMethod = options.Method.ToString().ToUpperInvariant(), expectedHeadOid = options.ExpectedHeadSha },
+                ct).ConfigureAwait(false);
+            return;
+        }
+
         // GitHub refuses the merge with 409 if the head no longer matches the reviewed SHA.
         var request = new MergeRequest(options.Method.ToString().ToLowerInvariant(), options.ExpectedHeadSha);
         using var response = await _http.PutAsJsonAsync($"{PullPath(pr)}/merge", request, Json, ct).ConfigureAwait(false);

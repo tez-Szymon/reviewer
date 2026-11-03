@@ -1,6 +1,7 @@
 using System.Globalization;
 using Reviewer.Agents.Cli;
 using Reviewer.Core.Agents;
+using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
 using Reviewer.Engine.Config;
@@ -117,6 +118,11 @@ internal sealed class QueueLauncher(ReviewerPaths paths, ReviewFactory factory, 
             ReviewDecision.Approve => "approved",
             ReviewDecision.RequestChanges => "requested changes",
             _ => "commented",
+        } + outcome.Merged switch
+        {
+            MergeIntent.Merge => ", merged",
+            MergeIntent.MergeWhenGreen => ", merging when CI passes",
+            _ => "",
         };
         return string.Create(
             CultureInfo.InvariantCulture,

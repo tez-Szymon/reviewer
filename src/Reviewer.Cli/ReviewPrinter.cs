@@ -1,5 +1,6 @@
 using System.Globalization;
 using Reviewer.Core.Findings;
+using Reviewer.Core.Policy;
 using Reviewer.Engine;
 
 namespace Reviewer.Cli;
@@ -72,6 +73,11 @@ internal static class ReviewPrinter
 
         output.WriteLine();
         output.WriteLine(outcome.Published ? "Published to the pull request." : "Dry run: nothing was published.");
+        if (outcome.Merged != MergeIntent.None)
+        {
+            output.WriteLine(outcome.Merged == MergeIntent.Merge ? "Merged." : "Set to merge when CI passes.");
+        }
+
         foreach (var warning in outcome.Warnings)
         {
             output.WriteLine($"Warning: {warning}");

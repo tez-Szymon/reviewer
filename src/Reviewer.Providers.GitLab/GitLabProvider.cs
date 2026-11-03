@@ -24,6 +24,8 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
     private static readonly HashSet<string> RunningPipelines =
         ["created", "waiting_for_resource", "preparing", "pending", "running", "scheduled", "manual"];
 
+    private static readonly HashSet<string> MergeableStatuses = ["mergeable", "ci_still_running", "ci_must_pass", "not_approved"];
+
     private readonly HttpClient _http = http;
     private UserDto? _currentUser;
 
@@ -31,7 +33,7 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
         SupportsRequestChanges: false,
         SupportsThreadResolve: true,
         SupportsSuggestions: true,
-        SupportsMergeWhenGreen: false);
+        SupportsMergeWhenGreen: true);
 
     /// <summary>An <see cref="HttpClient"/> for the GitLab instance at <paramref name="host"/>.</summary>
     public static HttpClient CreateHttpClient(Uri host, string token, HttpMessageHandler? handler = null)
@@ -131,8 +133,9 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
                 { } running when RunningPipelines.Contains(running) => CiState.Pending,
                 _ => CiState.Failure,
             },
-            // Anything else, including "checking" while GitLab works it out, is not mergeable yet.
-            dto.DetailedMergeStatus is { } detailed ? detailed == "mergeable" : dto.MergeStatus == "can_be_merged");
+            // CI and approvals have guards of their own. Anything else, including "checking" while GitLab works it out, is
+            // not mergeable yet.
+            dto.DetailedMergeStatus is { } detailed ? MergeableStatuses.Contains(detailed) : dto.MergeStatus == "can_be_merged");
     }
 
     public async Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct)
@@ -210,9 +213,10 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
             throw new NotSupportedException("GitLab merges with the project's merge method; set it to fast-forward in the project to rebase.");
         }
 
-        // GitLab refuses with 409 if the head no longer matches the reviewed SHA.
-        using var response = await _http.PutAsJsonAsync(
-            $"{MergeRequestPath(pr)}/merge", new MergeRequestMerge(options.ExpectedHeadSha, options.Method == MergeMethod.Squash), Json, ct)
+        // GitLab refuses with 409 if the head no longer matches the reviewed SHA. auto_merge replaced
+        // merge_when_pipeline_succeeds in 17.11; older instances only know the latter, newer ones accept both.
+        var request = new MergeRequestMerge(options.ExpectedHeadSha, options.Method == MergeMethod.Squash, options.WhenGreen, options.WhenGreen);
+        using var response = await _http.PutAsJsonAsync($"{MergeRequestPath(pr)}/merge", request, Json, ct)
             .ConfigureAwait(false);
         await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
     }

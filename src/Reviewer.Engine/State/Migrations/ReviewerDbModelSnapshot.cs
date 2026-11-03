@@ -145,6 +145,9 @@ namespace Reviewer.Engine.State.Migrations
                         .HasColumnType("TEXT")
                         .UseCollation("NOCASE");
 
+                    b.Property<string>("Merge")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("NotBefore")
                         .HasColumnType("INTEGER");
 

@@ -1,5 +1,6 @@
 using Reviewer.Core.Agents;
 using Reviewer.Core.Findings;
+using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 using Reviewer.Engine.Config;
 using Reviewer.Engine.State;
@@ -88,6 +89,74 @@ public sealed class ReviewRunnerTests : IDisposable
 
         var published = Assert.Single(provider.Published);
         Assert.Equal((decision, withdraw), (published.Decision, published.WithdrawApproval));
+    }
+
+    [Fact]
+    public async Task Run_GateMerge_MergesTheReviewedHead_AfterApproving()
+    {
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("Fine.", [Finding("minor", 2, Severity.Minor)]));
+
+        var outcome = await runner.RunAsync(request with { Policy = request.Policy with { Mode = ReviewMode.GateMerge } }, Ct);
+
+        Assert.Equal(ReviewDecision.Approve, Assert.Single(provider.Published).Decision);
+        Assert.Equal(new MergeOptions(MergeMethod.Squash, outcome.Snapshot.HeadSha), Assert.Single(provider.Merges));
+        Assert.Equal(MergeIntent.Merge, outcome.Merged);
+        Assert.Equal(MergeIntent.Merge, (await _store!.GetJobAsync(outcome.JobId, Ct))!.Job.Merge);
+    }
+
+    [Fact]
+    public async Task Run_GateMerge_MergesWhenGreen_WhenCiStartedDuringTheReview()
+    {
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("Fine.", []));
+        provider.Capabilities = provider.Capabilities with { SupportsMergeWhenGreen = true };
+        provider.Refreshed = provider.Snapshot with { Ci = CiState.Pending };
+
+        var outcome = await runner.RunAsync(request with { Policy = request.Policy with { Mode = ReviewMode.GateMerge } }, Ct);
+
+        Assert.True(Assert.Single(provider.Merges).WhenGreen);
+        Assert.Equal(MergeIntent.MergeWhenGreen, outcome.Merged);
+    }
+
+    [Fact]
+    public async Task Run_GateMerge_DoesNotMerge_WhenTheHeadMovedDuringTheReview()
+    {
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("Fine.", []));
+        provider.Refreshed = provider.Snapshot with { HeadSha = "0123456789abcdef0123456789abcdef01234567" };
+
+        var outcome = await runner.RunAsync(request with { Policy = request.Policy with { Mode = ReviewMode.GateMerge } }, Ct);
+
+        Assert.Equal(ReviewDecision.Approve, Assert.Single(provider.Published).Decision);
+        Assert.Equal(outcome.Snapshot.HeadSha, provider.Published[0].HeadSha);
+        Assert.Empty(provider.Merges);
+        Assert.Contains(outcome.Plan.Reasons, r => r.Contains("head moved", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Run_GateMerge_RefusedMerge_IsAWarning_AndTheReviewStands()
+    {
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("Fine.", []));
+        provider.MergeError = new InvalidOperationException("Required approvals missing.");
+
+        var outcome = await runner.RunAsync(request with { Policy = request.Policy with { Mode = ReviewMode.GateMerge } }, Ct);
+
+        Assert.Single(provider.Published);
+        Assert.Equal(MergeIntent.None, outcome.Merged);
+        Assert.Contains("Couldn't merge: Required approvals missing.", outcome.Warnings);
+        var job = (await _store!.GetJobAsync(outcome.JobId, Ct))!.Job;
+        Assert.Equal(JobState.Succeeded, job.State);
+        Assert.Null(job.Merge);
+    }
+
+    [Fact]
+    public async Task Run_GateMerge_DryRun_PlansTheMerge_ButDoesNotMerge()
+    {
+        var (runner, provider, request) = await SetUpAsync(new FindingsReport("Fine.", []), dryRun: true);
+
+        var outcome = await runner.RunAsync(request with { Policy = request.Policy with { Mode = ReviewMode.GateMerge } }, Ct);
+
+        Assert.Equal(MergeIntent.Merge, outcome.Plan.Merge);
+        Assert.Empty(provider.Merges);
+        Assert.Equal(MergeIntent.None, outcome.Merged);
     }
 
     [Fact]

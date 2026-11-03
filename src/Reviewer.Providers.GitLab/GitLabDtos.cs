@@ -59,4 +59,4 @@ internal sealed record ApproveRequest(string Sha);
 
 internal sealed record ResolveRequest(bool Resolved);
 
-internal sealed record MergeRequestMerge(string Sha, bool Squash);
+internal sealed record MergeRequestMerge(string Sha, bool Squash, bool AutoMerge, bool MergeWhenPipelineSucceeds);

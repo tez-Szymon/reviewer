@@ -1,5 +1,6 @@
 using System.Globalization;
 using Reviewer.Api;
+using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
 using Reviewer.Engine.State;
@@ -107,7 +108,7 @@ internal static class HistoryPrinter
     {
         var state = job.State switch
         {
-            JobState.Succeeded => Outcome(job.Decision, job.Published),
+            JobState.Succeeded => Outcome(job.Decision, job.Merge, job.Published),
             JobState.Running when job.CancelRequested => "stopping",
             JobState.Throttled when job.RetryAt is { } at => $"throttled until {Time(at)}",
             JobState.Skipped => "skipped, nothing new",
@@ -117,15 +118,20 @@ internal static class HistoryPrinter
         output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{DateTime.Now:HH:mm:ss}  {job.Id}  {job.Repo}#{job.Number}  {state}  [{job.Version}]"));
     }
 
-    private static string Outcome(JobRecord job) => Outcome(job.Decision, job.Published);
+    private static string Outcome(JobRecord job) => Outcome(job.Decision, job.Merge, job.Published);
 
-    private static string Outcome(ReviewDecision? decision, bool published)
+    private static string Outcome(ReviewDecision? decision, MergeIntent? merge, bool published)
     {
         var name = decision switch
         {
             ReviewDecision.Approve => "approved",
             ReviewDecision.RequestChanges => "requested changes",
             _ => "commented",
+        } + merge switch
+        {
+            MergeIntent.Merge => ", merged",
+            MergeIntent.MergeWhenGreen => ", merging when CI passes",
+            _ => "",
         };
         return published ? name : $"dry run ({name})";
     }

@@ -265,7 +265,6 @@ public class ConfigLoaderTests
     [InlineData("accounts: [{ id: gh, host: https://github.com:8443 }]", "only https://github.com is supported")]
     [InlineData("accounts: [{ id: a }, { id: a }]", "accounts[1].id: 'a' is already used")]
     [InlineData("agents: { default: gpt }", "agents.default: must be one of: claude-code, codex.")]
-    [InlineData("defaults: { review: { mode: gate-merge } }", "gate-merge arrives in M3")]
     [InlineData("defaults: { triggers: { initial: [has-label] } }", "has-label needs at least one label")]
     [InlineData("defaults: { triggers: { pollSeconds: 5 } }", "defaults.triggers.pollSeconds: must be at least 15.")]
     [InlineData("repos: [{ repo: api }]", "repos[0].repo: must be owner/name.")]

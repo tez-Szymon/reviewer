@@ -100,10 +100,13 @@ public class GitLabProviderTests
 
     [Theory]
     [InlineData("\"detailed_merge_status\": \"checking\"", false)]
-    [InlineData("\"detailed_merge_status\": \"not_approved\"", false)]
+    [InlineData("\"detailed_merge_status\": \"conflict\"", false)]
+    [InlineData("\"detailed_merge_status\": \"discussions_not_resolved\"", false)]
+    [InlineData("\"detailed_merge_status\": \"ci_still_running\"", true)]
+    [InlineData("\"detailed_merge_status\": \"not_approved\"", true)]
     [InlineData("\"merge_status\": \"can_be_merged\"", true)]
     [InlineData("\"merge_status\": \"cannot_be_merged\"", false)]
-    public async Task GetSnapshot_IsMergeableOnlyWhenGitLabSaysSo(string status, bool expected)
+    public async Task GetSnapshot_IsMergeableWhenOnlyCiOrApprovalsStandInTheWay(string status, bool expected)
     {
         var json = MrJson.Replace("\"detailed_merge_status\": \"mergeable\"", status, StringComparison.Ordinal);
 
@@ -325,6 +328,20 @@ public class GitLabProviderTests
 
         var body = gitlab.Body($"PUT {Mr}/merge");
         Assert.Equal((Sha, squash), (body.GetProperty("sha").GetString(), body.GetProperty("squash").GetBoolean()));
+        Assert.False(body.GetProperty("auto_merge").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Merge_WhenGreen_SetsAutoMerge_OldAndNewName()
+    {
+        var gitlab = new FakeGitLab().On($"PUT {Mr}/merge", "{}");
+
+        await gitlab.Provider().MergeAsync(Pr, new MergeOptions(MergeMethod.Squash, Sha, WhenGreen: true), Ct);
+
+        var body = gitlab.Body($"PUT {Mr}/merge");
+        Assert.True(body.GetProperty("auto_merge").GetBoolean());
+        Assert.True(body.GetProperty("merge_when_pipeline_succeeds").GetBoolean());
+        Assert.Equal(Sha, body.GetProperty("sha").GetString());
     }
 
     [Theory]
