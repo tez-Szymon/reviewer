@@ -164,8 +164,9 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
         var stillOpen = open.Where(o => !dismissed.Contains(o.Fingerprint) && !fixedFingerprints.Contains(o.Fingerprint)).ToList();
 
         // A person's call stands: a dismissed finding reported again doesn't block. It's kept in the report, so history
-        // shows it, as dropped.
-        var considered = report with { Findings = [.. report.Findings.Where(f => !dismissed.Contains(fingerprints[f]))] };
+        // shows it, as dropped. Checked against the PR, not `dismissed`: once a review records the dismissal the finding
+        // is no longer open, but its thread stays resolved.
+        var considered = report with { Findings = [.. report.Findings.Where(f => !resolvedOnPr.Contains(fingerprints[f]))] };
         var plan = PolicyEngine.Decide(
             considered, snapshot, request.Policy, provider.Capabilities, prepared.Scope, [.. stillOpen.Where(o => o.Blocking).Select(o => o.Finding)]);
         if (considered.Findings.Count < report.Findings.Count)
