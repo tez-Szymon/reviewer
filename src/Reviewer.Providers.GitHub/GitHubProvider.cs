@@ -76,8 +76,38 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
     public async Task<string> GetCurrentUserAsync(CancellationToken ct) =>
         _currentUser ??= (await GetAsync<UserDto>("user", ct).ConfigureAwait(false)).Login;
 
-    public IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct) =>
-        throw new NotImplementedException("Repo browsing comes with M2.");
+    /// <summary>
+    /// Every repo the token can see, or one owner's: the token owner's own, an organization's (private ones too when
+    /// the token is a member), or another user's public ones. Sorted by full name.
+    /// </summary>
+    public async IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var path = owner is null ? "user/repos?per_page=100&sort=full_name"
+            : string.Equals(owner, await GetCurrentUserAsync(ct).ConfigureAwait(false), StringComparison.OrdinalIgnoreCase)
+                ? "user/repos?affiliation=owner&per_page=100&sort=full_name"
+            : await IsOrganizationAsync(owner, ct).ConfigureAwait(false)
+                ? $"orgs/{Uri.EscapeDataString(owner)}/repos?per_page=100&sort=full_name"
+                : $"users/{Uri.EscapeDataString(owner)}/repos?per_page=100&sort=full_name";
+        await foreach (var repo in GetPagesAsync<RepoDto>(path, ct).ConfigureAwait(false))
+        {
+            if (RepoRef.TryParse(GitHubUrls.GitHubCom, repo.FullName, out var parsed))
+            {
+                yield return parsed;
+            }
+        }
+    }
+
+    private async Task<bool> IsOrganizationAsync(string owner, CancellationToken ct)
+    {
+        using var response = await _http.GetAsync($"orgs/{Uri.EscapeDataString(owner)}", ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, ct).ConfigureAwait(false);
+        return true;
+    }
 
     public async Task<PullRequestList> ListOpenPullRequestsAsync(RepoRef repo, string? etag, CancellationToken ct)
     {
@@ -115,7 +145,8 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
                     [.. (dto.Assignees ?? []).Select(u => u.Login)],
                     [.. (dto.RequestedReviewers ?? []).Select(u => u.Login)],
                     [.. (dto.Labels ?? []).Select(l => l.Name)],
-                    dto.Draft));
+                    dto.Draft,
+                    dto.Title ?? ""));
             }
 
             next = NextPage(response);

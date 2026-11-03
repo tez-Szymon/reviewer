@@ -318,6 +318,24 @@ public class GitLabProviderTests
     }
 
     [Theory]
+    [InlineData(null, "projects?membership=true&simple=true&order_by=path&sort=asc&per_page=100")]
+    [InlineData("platform/finance", "groups/platform%2Ffinance/projects?include_subgroups=true&simple=true&order_by=path&sort=asc&per_page=100")]
+    [InlineData("alice", "users/alice/projects?simple=true&order_by=path&sort=asc&per_page=100")]
+    public async Task ListRepos_ReadsMembershipsGroupsOrUsers(string? owner, string path)
+    {
+        var gitlab = new FakeGitLab()
+            .On("GET groups/platform%2Ffinance?with_projects=false", """{ "id": 3 }""")
+            .On("GET groups/alice?with_projects=false", """{ "message": "404 Group Not Found" }""", HttpStatusCode.NotFound)
+            .On($"GET {path}", """[{ "path_with_namespace": "platform/finance/billing" }]""");
+
+        var repos = await gitlab.Provider().ListAccessibleReposAsync(owner, Ct).ToListAsync(Ct);
+
+        var repo = Assert.Single(repos);
+        Assert.Equal(("platform/finance", "billing"), (repo.Owner, repo.Name));
+        Assert.Equal(new Uri("https://git.acme.test/gitlab/"), repo.Host);
+    }
+
+    [Theory]
     [InlineData(MergeMethod.Merge, false)]
     [InlineData(MergeMethod.Squash, true)]
     public async Task Merge_SendsTheReviewedSha(MergeMethod method, bool squash)

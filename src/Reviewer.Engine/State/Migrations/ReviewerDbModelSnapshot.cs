@@ -292,6 +292,10 @@ namespace Reviewer.Engine.State.Migrations
                     b.Property<bool>("Assigned")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Author")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("HeadSha")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -317,6 +321,10 @@ namespace Reviewer.Engine.State.Migrations
 
                     b.Property<long>("SeenAt")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Key");
 

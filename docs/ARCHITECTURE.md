@@ -354,6 +354,16 @@ Each review's effective config gets a hash of the settings that shape its result
 
 Repo selection in the app: browse repos visible to an account (by user, org or group) and tick them, or paste a URL. Both produce an entry under `repos`.
 
+**Saving from the app.** People edit `config.yaml` by hand too, so the app never rewrites the whole file. `ConfigEditor` applies edits (set, remove, or add to a list, at a key path as config errors print it: `repos[2].overrides.review.mode`) to the text itself, using the parser's node positions. Each edit rewrites only the span of the node it changes:
+
+- A new value is written in flow style (`{ mode: gate }`, `[a, b]`).
+- A new key goes on its own line after its siblings, at their indentation, with missing maps created in block style.
+- A removed key or list item takes its lines, end-of-line comment included. The last one leaves `{}` or `[]`, since an empty block would read as null.
+
+Comments, blank lines, quoting and key order elsewhere are untouched, and so are Windows line endings. Strings YAML would read as something else (`"true"`, `"12"`, `"**/dist/**"`) are quoted.
+
+`ConfigFile` saves an edited or replaced file only if it still has the hash the client read, so a hand edit made meanwhile is never overwritten (409 with the current hash). It saves only if the result is valid (422 with the errors), and writes to a temporary file that replaces the old one.
+
 The effective config per job is computed and stored with the review. A policy change does **not** re-review open PRs that already have a review. It applies from the next trigger (new commits, reassignment, or a manual run). PRs never reviewed are picked up under the new policy as usual.
 
 ## Local API, desktop and CLI
@@ -372,6 +382,12 @@ The effective config per job is computed and stored with the review. A policy ch
 | `GET /pulls/{owner}/{repo}/{number}?host=` | A PR's last published review, open findings and jobs |
 | `GET /config`, `/config/repos/{owner}/{repo}` | The merged config, and a repo's effective settings |
 | `POST /config/validate` | Check a `config.yaml` body (`application/yaml` or `text/plain`) without saving it |
+| `GET /config/file`, `PUT /config/file` | The file as written with its hash; replace it (`{yaml, baseHash}`) |
+| `PATCH /config` | Apply edits (`{baseHash, edits: [{op: set\|remove\|add, path, value}]}`), all or none, keeping comments and layout |
+| `GET /accounts` | The configured accounts, with token references only |
+| `GET /accounts/{id}/status` | Whether the account's token works, and whose it is |
+| `GET /accounts/{id}/repos?owner=` | Repos the account can see, all or one user's, organization's or GitLab group's (subgroups included), marked when watched |
+| `GET /pulls?repo=` | Open PRs in watched repos as last polled, with title, author, last review and newest job |
 | `GET /events` | Server-Sent Events: a `job` event per change to a job |
 | `GET /openapi/v1.json` | The OpenAPI spec |
 
@@ -379,7 +395,12 @@ Responses are JSON with camelCase keys and kebab-case enum values, as in the con
 
 **Events.** Every insert or update of a job, by any process, gives it a new `Version`: SQLite triggers set it to one past the highest, and since SQLite runs one write at a time, versions commit in order. `/events` polls for versions past the last one it sent (every second) and sends each changed job in its latest state, with its version as the event id; a job that changed twice between polls is sent once. A stream starts from now, from `?after=<version>`, or from `Last-Event-ID` when an `EventSource` reconnects, so a reconnect misses nothing. A client opens the stream first, then loads the lists, and keeps the higher version of each job. `reviewer watch` prints the stream.
 
-Config save and repo browsing come with the desktop app in M3, which needs them for its Settings and Repos screens; until then `config.yaml` is edited by hand. The OpenAPI spec is there for the desktop's typed client; `EngineClient` in `Reviewer.Api` is the hand-written client the CLI uses for now.
+The account endpoints use the providers `reviewer serve`'s scheduler keeps, one per account, shared one caller at a time. Repo browsing is `ListAccessibleReposAsync`:
+
+- **GitHub:** `user/repos`; for one owner, the token owner's own repos, an organization's, or another user's public ones.
+- **GitLab:** `projects?membership=true`; for one owner, a group's projects with its subgroups', or a user's.
+
+The OpenAPI spec is there for the desktop's typed client; `EngineClient` in `Reviewer.Api` is the hand-written client the CLI uses for now.
 
 **Engine lifetime.** The desktop app starts the engine as a child process if none is running and offers "start at login" (LaunchAgent on macOS, Startup entry on Windows). Closing the window leaves a tray icon; quitting the app stops the engine unless "keep running" is on.
 
@@ -418,7 +439,7 @@ reviewer serve                      # run the engine headless
 - `PullRequests`: each PR's last *published* review (head, base, job, commit patch-ids, per-file hashes). Dry runs don't move it, since nothing reached the PR.
 
 - `PollStates`: per watched repo, the PR list's ETag, a hash of the trigger settings and token owner it was read with, and when it was last polled.
-- `SeenPullRequests`: each open PR as the scheduler last saw it while the filters passed (head, whether an initial trigger matched, whether the token owner was assigned or requested); closed PRs are forgotten.
+- `SeenPullRequests`: each open PR as the scheduler last saw it while the filters passed (head, title, author, whether an initial trigger matched, whether the token owner was assigned or requested); closed PRs are forgotten. `GET /pulls` lists them.
 
 Published comments aren't mirrored: each one carries its fingerprint in a hidden marker, and `GetOwnCommentsAsync` reads them back from the provider. Hosts and repo names compare case-insensitively. Job folders are pruned after N days; findings stay in the DB.
 

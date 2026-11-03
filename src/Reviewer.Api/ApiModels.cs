@@ -4,6 +4,7 @@ using Reviewer.Core.Findings;
 using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
+using Reviewer.Engine.Config;
 using Reviewer.Engine.State;
 
 namespace Reviewer.Api;
@@ -11,6 +12,18 @@ namespace Reviewer.Api;
 /// <summary>The engine process behind the API.</summary>
 /// <param name="ProcessId">Also what <see cref="JobDto.RunnerPid"/> holds for the jobs this engine runs.</param>
 public sealed record EngineStatus(string Version, int ProcessId, DateTimeOffset StartedAt, string DataFolder);
+
+/// <summary>An account from the config.</summary>
+/// <param name="Token">The token's reference (<c>env:NAME</c>, <c>keychain:SERVICE/ACCOUNT</c>), never the token; null uses the provider's defaults.</param>
+public sealed record AccountDto(string Id, string Provider, Uri Host, string? Token);
+
+/// <summary>Whether the account's token works, and whose it is.</summary>
+public sealed record AccountStatus(string Id, bool SignedIn, string? Login, string? Problem);
+
+/// <summary>A repo the account can see, for picking repos to watch.</summary>
+/// <param name="Repo">The path as <c>repos</c> takes it: <c>owner/name</c>, or a GitLab project's full path.</param>
+/// <param name="Watched">The config already has an entry for it under this account.</param>
+public sealed record RepoChoice(string Repo, bool Watched);
 
 /// <summary>Whether an agent can run reviews now.</summary>
 public sealed record AgentStatus(string Id, bool Ready, bool Installed, bool LoggedIn, string? Version, string? Problem);
@@ -94,6 +107,33 @@ public sealed record LastReviewDto(string HeadSha, string BaseSha, DateTimeOffse
 /// <param name="HeadSha">The head it was reported against; its lines refer to that commit.</param>
 public sealed record OpenFindingDto(Finding Finding, string Fingerprint, string HeadSha, bool Blocking);
 
+/// <summary>
+/// An open PR in a watched repo as the scheduler last saw it, with its last published review and newest job. A last
+/// review whose head isn't <paramref name="HeadSha"/> means commits arrived since.
+/// </summary>
+/// <param name="Title">Untrusted author text.</param>
+/// <param name="Matched">An initial trigger matched, so it's reviewed when it changes.</param>
+public sealed record WatchedPullRequestDto(
+    string Host,
+    string Repo,
+    int Number,
+    string Title,
+    string Author,
+    string HeadSha,
+    bool Matched,
+    bool Assigned,
+    bool ReviewRequested,
+    DateTimeOffset SeenAt,
+    LastReviewDto? LastReview,
+    JobSummaryDto? LatestJob)
+{
+    public static WatchedPullRequestDto From(WatchedPullRequest w) => new(
+        w.Seen.Host, w.Seen.Repo, w.Seen.Number, w.Seen.Title, w.Seen.Author, w.Seen.HeadSha, w.Seen.Matched, w.Seen.Assigned,
+        w.Seen.ReviewRequested, w.Seen.SeenAt,
+        w.LastReview is { } r ? new LastReviewDto(r.LastReviewedHead, r.LastReviewedBase, r.LastReviewedAt, r.LastJobId) : null,
+        w.LatestJob is { } j ? JobSummaryDto.From(j) : null);
+}
+
 /// <summary>A PR's review state: its last published review, what's still open on it, and its jobs, newest first.</summary>
 public sealed record PullRequestDto(
     string Host, string Repo, int Number, LastReviewDto? LastReview, IReadOnlyList<OpenFindingDto> OpenFindings, IReadOnlyList<JobSummaryDto> Jobs);
@@ -111,6 +151,12 @@ public sealed record QueueResult(string JobId, bool Added);
 public sealed record CancelResult(string JobId, JobState State);
 
 public sealed record ConfigValidation(bool Valid, IReadOnlyList<string> Errors);
+
+/// <summary>A new <c>config.yaml</c>, to replace the one with <paramref name="BaseHash"/>.</summary>
+public sealed record ConfigSave(string Yaml, string BaseHash);
+
+/// <summary>Edits to apply in order to the <c>config.yaml</c> with <paramref name="BaseHash"/>; all or none are saved.</summary>
+public sealed record ConfigEdits(string BaseHash, IReadOnlyList<ConfigEdit> Edits);
 
 /// <summary>JSON as the API reads and writes it: camelCase keys, kebab-case enum values as in <c>config.yaml</c>.</summary>
 public static class ApiJson

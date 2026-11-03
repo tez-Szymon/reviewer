@@ -9,6 +9,11 @@ namespace Reviewer.Engine.State;
 /// not yet followed.
 /// </param>
 /// <param name="HeadReviewed">The current head was reviewed already under the current config.</param>
+/// <summary>An open PR in a watched repo, as <see cref="ReviewStore.ListWatchedAsync"/> lists it.</summary>
+/// <param name="LastReview">Its last published review; null before the first.</param>
+/// <param name="LatestJob">Its newest job in any state; null when it has none.</param>
+public sealed record WatchedPullRequest(SeenPullRequestRecord Seen, PullRequestRecord? LastReview, JobSummary? LatestJob);
+
 public sealed record ReviewHistory(string? ReviewedHead, bool HeadReviewed);
 
 /// <remarks>The scheduler's state: each watched repo's last PR list, and its open PRs as last seen.</remarks>
@@ -51,12 +56,13 @@ public sealed partial class ReviewStore
     /// Records the PRs as seen now, and forgets the repo's PRs that aren't open any more. PRs that are open but not in
     /// <paramref name="seen"/> keep what was recorded last.
     /// </summary>
-    /// <param name="open">Numbers of all the repo's open PRs.</param>
-    public async Task SaveSeenAsync(RepoRef repo, IReadOnlyDictionary<int, SeenPullRequest> seen, IReadOnlyCollection<int> open, CancellationToken ct)
+    /// <param name="open">All the repo's open PRs; the recorded ones get their current title and author.</param>
+    public async Task SaveSeenAsync(
+        RepoRef repo, IReadOnlyDictionary<int, SeenPullRequest> seen, IReadOnlyCollection<PullRequestSummary> open, CancellationToken ct)
     {
         var (host, name) = (Host(repo), repo.ToString());
         var now = _time.GetUtcNow();
-        var numbers = open.ToList();
+        var numbers = open.Select(p => p.Ref.Number).ToList();
         await using var db = new ReviewerDb(_options);
         await db.SeenPullRequests.Where(p => p.Host == host && p.Repo == name && !numbers.Contains(p.Number))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
@@ -68,6 +74,7 @@ public sealed partial class ReviewStore
             if (!records.TryGetValue(number, out var record))
             {
                 db.SeenPullRequests.Add(record = new SeenPullRequestRecord { Host = host, Repo = name, Number = number, HeadSha = pr.HeadSha });
+                records[number] = record;
             }
 
             record.HeadSha = pr.HeadSha;
@@ -77,7 +84,42 @@ public sealed partial class ReviewStore
             record.SeenAt = now;
         }
 
+        foreach (var pr in open)
+        {
+            if (records.TryGetValue(pr.Ref.Number, out var record))
+            {
+                (record.Title, record.Author) = (pr.Title, pr.Author);
+            }
+        }
+
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The open PRs in watched repos as the scheduler last saw them (those its filters let through), each with its last
+    /// published review and newest job. By repo, newest PR first.
+    /// </summary>
+    /// <param name="repo"><c>owner/name</c> to list one repo only.</param>
+    public async Task<IReadOnlyList<WatchedPullRequest>> ListWatchedAsync(string? repo, CancellationToken ct)
+    {
+        await using var db = new ReviewerDb(_options);
+        var seen = await db.SeenPullRequests.AsNoTracking().Where(p => repo == null || p.Repo == repo).ToListAsync(ct).ConfigureAwait(false);
+        var repos = seen.Select(p => p.Repo).Distinct().ToList();
+        var numbers = seen.Select(p => p.Number).Distinct().ToList();
+        var reviews = (await db.PullRequests.AsNoTracking().Where(p => repos.Contains(p.Repo) && numbers.Contains(p.Number)).ToListAsync(ct).ConfigureAwait(false))
+            .ToDictionary(p => (p.Host, p.Repo, p.Number));
+        var jobs = (await db.Jobs.AsNoTracking().Where(j => repos.Contains(j.Repo) && numbers.Contains(j.Number))
+                .Select(j => new JobSummary(
+                    j,
+                    j.Findings.Count(f => f.Disposition == FindingDisposition.Inline),
+                    j.Findings.Count(f => f.Disposition == FindingDisposition.Summary),
+                    j.Findings.Count(f => f.Blocking)))
+                .ToListAsync(ct).ConfigureAwait(false))
+            .GroupBy(j => (j.Job.Host, j.Job.Repo, j.Job.Number))
+            .ToDictionary(g => g.Key, g => g.MaxBy(j => (j.Job.CreatedAt, j.Job.Id))!);
+        return [.. seen
+            .OrderBy(p => p.Host, StringComparer.Ordinal).ThenBy(p => p.Repo, StringComparer.Ordinal).ThenByDescending(p => p.Number)
+            .Select(p => new WatchedPullRequest(p, reviews.GetValueOrDefault((p.Host, p.Repo, p.Number)), jobs.GetValueOrDefault((p.Host, p.Repo, p.Number))))];
     }
 
     /// <summary>The PR's reviews as far as the trigger rules care: succeeded and skipped jobs, dry runs included.</summary>

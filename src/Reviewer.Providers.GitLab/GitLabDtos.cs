@@ -3,6 +3,8 @@ namespace Reviewer.Providers.GitLab;
 // Only the fields the adapter reads. Names map via snake_case.
 internal sealed record UserDto(long Id, string Username);
 
+internal sealed record ProjectDto(string PathWithNamespace);
+
 internal sealed record MergeRequestDto(
     int Iid,
     string? Title,
