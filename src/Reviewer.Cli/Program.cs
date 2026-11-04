@@ -350,9 +350,21 @@ queue.SetAction(async (_, ct) =>
     }
 });
 
-var serve = new Command("serve", "Run the engine: poll the configured repos and review queued jobs until stopped with Ctrl+C");
-serve.SetAction(async (_, ct) =>
+var serveLog = new Option<string?>("--log")
 {
+    Description = "Append the engine's output to this file instead of the terminal, so it can outlive what started it",
+};
+var serve = new Command("serve", "Run the engine: poll the configured repos and review queued jobs until stopped with Ctrl+C") { serveLog };
+serve.SetAction(async (parse, ct) =>
+{
+    // The desktop app starts the engine this way: with nothing piped to the app, the engine keeps working after it quits.
+    using var logFile = parse.GetValue(serveLog) is { } logPath ? OpenLog(logPath) : null;
+    if (logFile is not null)
+    {
+        Console.SetOut(logFile);
+        Console.SetError(logFile);
+    }
+
     if (await LoadConfigAsync(paths, ct) is not { } config)
     {
         return 1;
@@ -433,6 +445,13 @@ serve.SetAction(async (_, ct) =>
     }
 
     static void Log(string message) => Console.WriteLine($"{DateTime.Now:HH:mm:ss} {message}");
+
+    static TextWriter OpenLog(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        var file = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+        return TextWriter.Synchronized(new StreamWriter(file) { AutoFlush = true });
+    }
 });
 
 var watchAfter = new Option<long?>("--after") { Description = "Replay changes after this event id (a job's version) first" };

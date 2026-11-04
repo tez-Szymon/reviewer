@@ -25,7 +25,7 @@ internal interface IEngineLauncher
 internal sealed class EngineLaunchException(string message) : Exception(message);
 
 /// <summary>
-/// Starts <c>reviewer serve</c> as a child process, its output appended to <c>engine.log</c> in the data folder. The CLI
+/// Starts <c>reviewer serve</c>, which appends its output to <c>engine.log</c> in the data folder itself. The CLI
 /// is <c>REVIEWER_CLI</c> when set, otherwise the one next to the app, otherwise the first on <c>PATH</c>.
 /// </summary>
 internal sealed class EngineLauncher(ReviewerPaths paths) : IEngineLauncher
@@ -39,43 +39,23 @@ internal sealed class EngineLauncher(ReviewerPaths paths) : IEngineLauncher
         var cli = FindCli() ?? throw new EngineLaunchException(
             $"Couldn't find the reviewer CLI to start the engine with: not next to the app, not on PATH, and REVIEWER_CLI isn't set.");
         Directory.CreateDirectory(paths.Root);
-        var start = new ProcessStartInfo(cli, ["serve"])
+
+        // The engine writes its own log, so nothing ties it to the app: it can keep running after the app quits.
+        var start = new ProcessStartInfo(cli, ["serve", "--log", LogPath])
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
         };
         start.Environment["REVIEWER_HOME"] = paths.Root;
 
-        Process process;
         try
         {
-            process = Process.Start(start) ?? throw new EngineLaunchException($"{cli} didn't start.");
+            return new ChildProcess(Process.Start(start) ?? throw new EngineLaunchException($"{cli} didn't start."));
         }
         catch (System.ComponentModel.Win32Exception e)
         {
             throw new EngineLaunchException($"Couldn't start {cli}: {e.Message}");
         }
-
-        var log = new StreamWriter(LogPath, append: true) { AutoFlush = true };
-        var gate = new Lock();
-        void Write(string? line)
-        {
-            if (line is not null)
-            {
-                lock (gate)
-                {
-                    log.WriteLine(line);
-                }
-            }
-        }
-
-        process.OutputDataReceived += (_, e) => Write(e.Data);
-        process.ErrorDataReceived += (_, e) => Write(e.Data);
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        return new ChildProcess(process, log);
     }
 
     private static string? FindCli()
@@ -97,7 +77,7 @@ internal sealed class EngineLauncher(ReviewerPaths paths) : IEngineLauncher
             .FirstOrDefault(File.Exists);
     }
 
-    private sealed class ChildProcess(Process process, StreamWriter log) : IEngineProcess
+    private sealed class ChildProcess(Process process) : IEngineProcess
     {
         public bool HasExited => process.HasExited;
 
@@ -105,10 +85,6 @@ internal sealed class EngineLauncher(ReviewerPaths paths) : IEngineLauncher
 
         public void Kill() => process.Kill(entireProcessTree: true);
 
-        public void Dispose()
-        {
-            process.Dispose();
-            log.Dispose();
-        }
+        public void Dispose() => process.Dispose();
     }
 }
