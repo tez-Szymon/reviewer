@@ -17,6 +17,9 @@ internal abstract partial class PageViewModel : ObservableObject
 
     public virtual Task LoadAsync() => Task.CompletedTask;
 
+    /// <summary>Loaded again each time it's shown, as pages over <c>config.yaml</c> are: the file may have been edited by hand.</summary>
+    public virtual bool ReloadWhenShown => false;
+
     public virtual void OnChanged(JobDto job)
     {
     }

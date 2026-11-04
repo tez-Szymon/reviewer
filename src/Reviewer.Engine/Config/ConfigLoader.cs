@@ -53,6 +53,13 @@ public static partial class ConfigLoader
         return Parse(yaml, path);
     }
 
+    /// <summary>
+    /// What <paramref name="yaml"/> itself sets, without the built-in defaults or any checks: the keys an editor shows as
+    /// set here, and leaves to inherit when absent. Scalars are typed as <see cref="Parse"/> reads them.
+    /// </summary>
+    /// <exception cref="ConfigException">The text isn't YAML, or its top level isn't a map.</exception>
+    public static JsonObject ReadSettings(string yaml, string source = FileName) => YamlToJson.Convert(yaml, source).Root;
+
     /// <param name="source">Names the file in error messages.</param>
     /// <exception cref="ConfigException">The config is invalid.</exception>
     public static ReviewerConfig Parse(string yaml, string source = FileName)

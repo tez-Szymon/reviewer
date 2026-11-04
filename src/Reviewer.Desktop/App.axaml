@@ -31,6 +31,33 @@
     <DataTemplate DataType="vm:PullsViewModel"><v:PullsView /></DataTemplate>
     <DataTemplate DataType="vm:HistoryViewModel"><v:HistoryView /></DataTemplate>
     <DataTemplate DataType="vm:JobDetailViewModel"><v:JobDetailView /></DataTemplate>
+    <DataTemplate DataType="vm:ReposViewModel"><v:ReposView /></DataTemplate>
+    <DataTemplate DataType="vm:SettingsViewModel"><v:SettingsView /></DataTemplate>
+
+    <!-- Settings forms: a section is a card of fields; a field is set here (ticked) or inherits. -->
+    <DataTemplate DataType="vm:SettingSection">
+      <Border Classes="card">
+        <StackPanel Spacing="4">
+          <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+          <ItemsControl ItemsSource="{Binding Fields}" />
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+    <DataTemplate DataType="vm:SettingField">
+      <Grid ColumnDefinitions="230,*" ColumnSpacing="12" Margin="0,4">
+        <CheckBox VerticalAlignment="Top" Content="{Binding Label}" IsChecked="{Binding IsSet}"
+                  ToolTip.Tip="Ticked: set at this level. Unticked: inherits." />
+        <StackPanel Grid.Column="1" Spacing="2">
+          <ComboBox MinWidth="220" IsVisible="{Binding IsChoice}" IsEnabled="{Binding IsSet}"
+                    ItemsSource="{Binding Options}" SelectedItem="{Binding Value}" />
+          <TextBox IsVisible="{Binding IsText}" IsEnabled="{Binding IsSet}" Text="{Binding Value}"
+                   AcceptsReturn="{Binding IsLines}" TextWrapping="NoWrap" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding InheritedText}" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding Hint}"
+                     IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </StackPanel>
+      </Grid>
+    </DataTemplate>
   </Application.DataTemplates>
 
   <Application.Styles>

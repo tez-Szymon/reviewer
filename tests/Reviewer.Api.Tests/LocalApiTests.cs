@@ -425,6 +425,41 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task Client_EditsConfig_AndReportsConflictsAndEveryError()
+    {
+        await File.WriteAllTextAsync(_paths.Config, "# mine\nrepos: [{ repo: acme/api }]\n", Ct);
+        var file = await _client.GetConfigFileAsync(Ct);
+
+        var saved = await _client.EditConfigAsync(
+            new ConfigEdits(file.Hash, [new ConfigEdit(ConfigEditOp.Set, "repos[0].overrides.review.mode", System.Text.Json.Nodes.JsonValue.Create("gate"))]), Ct);
+        var stale = await Assert.ThrowsAsync<EngineApiException>(() =>
+            _client.EditConfigAsync(new ConfigEdits(file.Hash, [new ConfigEdit(ConfigEditOp.Remove, "repos[0]")]), Ct));
+        var invalid = await Assert.ThrowsAsync<EngineApiException>(() => _client.EditConfigAsync(new ConfigEdits(saved.Hash,
+        [
+            new ConfigEdit(ConfigEditOp.Set, "defaults.review.minConfidence", System.Text.Json.Nodes.JsonValue.Create(2)),
+            new ConfigEdit(ConfigEditOp.Set, "defaults.triggers.pollSeconds", System.Text.Json.Nodes.JsonValue.Create(5)),
+        ]), Ct));
+
+        Assert.Equal("# mine\nrepos: [{ repo: acme/api, overrides: { review: { mode: gate } } }]\n", saved.Yaml);
+        Assert.Equal(saved, await _client.GetConfigFileAsync(Ct));
+        Assert.Equal(HttpStatusCode.Conflict, stale.Status);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.Status);
+        Assert.Equal(2, invalid.Errors.Count);
+        Assert.Contains(invalid.Errors, e => e.Contains("defaults.review.minConfidence", StringComparison.Ordinal));
+        Assert.Contains(invalid.Errors, e => e.Contains("defaults.triggers.pollSeconds", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Client_ReadsAccountStatusAndRepos()
+    {
+        _provider.Repos.Add(new RepoRef(new Uri("https://github.com"), "acme", "api"));
+
+        Assert.Equal(new AccountStatus("github", true, "reviewer-bot", null), await _client.GetAccountStatusAsync("github", Ct));
+        Assert.Equal([new RepoChoice("acme/api", false)], await _client.ListAccountReposAsync("github", "acme", Ct));
+        Assert.Equal("acme", Assert.Single(_provider.Listed));
+    }
+
+    [Fact]
     public async Task Pulls_ListWatchedOpenPrs_WithTitlesAndTheirNewestJob()
     {
         var repo = new RepoRef(new Uri("https://github.com"), "acme", "api");

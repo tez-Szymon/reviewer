@@ -5,6 +5,7 @@ using System.Net.ServerSentEvents;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Reviewer.Engine.Config;
 
 namespace Reviewer.Api;
 
@@ -106,6 +107,24 @@ public sealed class EngineClient : IEngineClient, IDisposable
 
     public Task<List<AccountDto>> GetAccountsAsync(CancellationToken ct) => GetAsync<List<AccountDto>>("accounts", ct);
 
+    /// <inheritdoc />
+    public Task<AccountStatus> GetAccountStatusAsync(string id, CancellationToken ct) =>
+        GetAsync<AccountStatus>($"accounts/{Uri.EscapeDataString(id)}/status", ct);
+
+    /// <inheritdoc />
+    public Task<List<RepoChoice>> ListAccountReposAsync(string id, string? owner, CancellationToken ct) =>
+        GetAsync<List<RepoChoice>>(Query($"accounts/{Uri.EscapeDataString(id)}/repos", ("owner", owner)), ct);
+
+    /// <inheritdoc />
+    public Task<ConfigText> GetConfigFileAsync(CancellationToken ct) => GetAsync<ConfigText>("config/file", ct);
+
+    /// <inheritdoc />
+    public async Task<ConfigText> EditConfigAsync(ConfigEdits edits, CancellationToken ct)
+    {
+        using var response = await _http.PatchAsJsonAsync("config", edits, ApiJson.Options, ct).ConfigureAwait(false);
+        return await ReadAsync<ConfigText>(response, ct).ConfigureAwait(false);
+    }
+
     /// <summary>Open PRs in watched repos as last polled.</summary>
     public Task<List<WatchedPullRequestDto>> ListPullsAsync(string? repo, CancellationToken ct) =>
         GetAsync<List<WatchedPullRequestDto>>(Query("pulls", ("repo", repo)), ct);
@@ -174,22 +193,30 @@ public sealed class EngineClient : IEngineClient, IDisposable
 }
 
 /// <summary>The engine answered with an error; <see cref="Exception.Message"/> is its problem detail.</summary>
-public sealed class EngineApiException(HttpStatusCode status, string message) : Exception(message)
+public sealed class EngineApiException(HttpStatusCode status, string message, IReadOnlyList<string>? errors = null) : Exception(message)
 {
     public HttpStatusCode Status { get; } = status;
+
+    /// <summary>Each problem the engine listed, such as every error in an invalid <c>config.yaml</c>; empty when it listed none.</summary>
+    public IReadOnlyList<string> Errors { get; } = errors ?? [];
 
     internal static async Task<EngineApiException> FromAsync(HttpResponseMessage response, CancellationToken ct)
     {
         string? detail = null;
+        List<string>? errors = null;
         try
         {
             using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
             detail = problem.RootElement.TryGetProperty("detail", out var d) ? d.GetString() : null;
+            if (problem.RootElement.TryGetProperty("errors", out var list) && list.ValueKind == JsonValueKind.Array)
+            {
+                errors = [.. list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!)];
+            }
         }
         catch (JsonException)
         {
         }
 
-        return new EngineApiException(response.StatusCode, detail ?? $"The engine answered {(int)response.StatusCode} {response.ReasonPhrase}.");
+        return new EngineApiException(response.StatusCode, detail ?? $"The engine answered {(int)response.StatusCode} {response.ReasonPhrase}.", errors);
     }
 }
