@@ -356,30 +356,36 @@ public static class LocalApi
             SaveConfigAsync(() => ConfigFile.EditAsync(engine.Paths.Config, request.Edits, request.BaseHash, ct)))
             .WithSummary("Set, remove or add values at key paths such as repos[0].overrides.review.mode, changing only those spans of config.yaml, so its comments and layout stay");
 
-        api.MapGet("/events", (HttpContext context, IHostApplicationLifetime lifetime, long? after) =>
+        api.MapGet("/events", async (HttpContext context, IHostApplicationLifetime lifetime, long? after, CancellationToken ct) =>
         {
             // Last-Event-ID is what an EventSource sends when it reconnects; after lets a client start from a version it has.
+            // "From now on" is fixed before the response starts, so a client that loads its lists once the stream is open
+            // misses no change made in between.
             var from = long.TryParse(context.Request.Headers["Last-Event-ID"], NumberStyles.None, CultureInfo.InvariantCulture, out var last)
                 ? last
-                : after;
+                : after ?? await store.GetLatestVersionAsync(ct).ConfigureAwait(false);
             var stop = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, lifetime.ApplicationStopping);
             context.Response.RegisterForDispose(stop);
-            return TypedResults.ServerSentEvents(JobEventsAsync(store, from, eventPollInterval, stop.Token));
+            // The response is sent with its first event otherwise; flushing it at once tells the client the stream is
+            // open, which is when it loads its lists.
+            return TypedResults.ServerSentEvents(JobEventsAsync(store, from, eventPollInterval, () => context.Response.Body.FlushAsync(stop.Token), stop.Token));
         }).WithSummary("Server-sent 'job' events, one per change to a job, by any process");
     }
 
-    /// <summary>Each change to a job after <paramref name="after"/>, or from now on when it's null, until cancelled.</summary>
+    /// <summary>Each change to a job after <paramref name="after"/>, until cancelled.</summary>
+    /// <param name="started">Called when streaming starts, before any change is looked for: sends the response headers.</param>
     internal static async IAsyncEnumerable<SseItem<JobDto>> JobEventsAsync(
-        ReviewStore store, long? after, TimeSpan pollInterval, [EnumeratorCancellation] CancellationToken ct)
+        ReviewStore store, long after, TimeSpan pollInterval, Func<Task> started, [EnumeratorCancellation] CancellationToken ct)
     {
-        long cursor;
+        var cursor = after;
         IReadOnlyList<JobRecord> changes;
         try
         {
-            cursor = after ?? await store.GetLatestVersionAsync(ct).ConfigureAwait(false);
+            await started().ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (Exception e) when (e is OperationCanceledException or IOException)
         {
+            // The client went away.
             yield break;
         }
 
