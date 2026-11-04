@@ -104,11 +104,48 @@ internal sealed partial class EngineConnection(IEngineClient client, IEngineLaun
     /// <summary>Stops the engine if the app started it: asks it to shut down, and kills it if it doesn't.</summary>
     public async Task StopAsync()
     {
-        if (_process is not { HasExited: false } process)
+        if (_process is { HasExited: false } process)
         {
+            await StopAsync(process);
+        }
+    }
+
+    /// <summary>
+    /// An engine is running from the app's folder: one the app started, or one left running by an earlier run. An
+    /// update would replace its files, so it's applied only once that engine has stopped.
+    /// </summary>
+    public bool RunsFromApp()
+    {
+        if (StartedHere)
+        {
+            return true;
+        }
+
+        using var bundled = Status is { } status ? launcher.FindBundled(status.ProcessId) : null;
+        return bundled is { HasExited: false };
+    }
+
+    /// <summary>
+    /// Stops the engine before an update: one the app started, whatever keep running says, or one running from the
+    /// app's folder. A review it was running is queued again, as when it's stopped with Ctrl+C.
+    /// </summary>
+    public async Task StopForUpdateAsync()
+    {
+        if (StartedHere)
+        {
+            await StopAsync(_process!);
             return;
         }
 
+        using var bundled = Status is { } status ? launcher.FindBundled(status.ProcessId) : null;
+        if (bundled is { HasExited: false })
+        {
+            await StopAsync(bundled);
+        }
+    }
+
+    private async Task StopAsync(IEngineProcess process)
+    {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         try
         {

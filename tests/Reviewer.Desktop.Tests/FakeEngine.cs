@@ -189,6 +189,51 @@ internal sealed class FakeLauncher(FakeEngine engine) : IEngineLauncher
 
         return Process = new FakeProcess { HasExited = ExitsAtOnce };
     }
+
+    /// <summary>An engine running from the app's folder that the app didn't start, such as one kept running from an earlier run.</summary>
+    public FakeProcess? Bundled { get; set; }
+
+    public IEngineProcess? FindBundled(int processId) => Bundled is { } bundled && processId == FakeEngine.Running.ProcessId ? bundled : null;
+}
+
+internal sealed class FakeUpdater : IAppUpdater
+{
+    public bool IsInstalled { get; set; } = true;
+
+    public string? CurrentVersion { get; set; } = "1.0.0";
+
+    /// <summary>What the next check finds, or throws.</summary>
+    public Func<string?> Latest { get; set; } = () => null;
+
+    public List<string> Calls { get; } = [];
+
+    public Task<string?> DownloadLatestAsync(CancellationToken ct)
+    {
+        Calls.Add("check");
+        return Task.FromResult(Latest());
+    }
+
+    public void ApplyAndRestart() => Calls.Add("restart");
+
+    public void ApplyOnExit() => Calls.Add("apply-on-exit");
+}
+
+internal sealed class FakeLoginItem : ILoginItem
+{
+    public bool IsEnabled { get; set; }
+
+    public string? Refuse { get; set; }
+
+    public string? Set(bool enabled)
+    {
+        if (Refuse is not null)
+        {
+            return Refuse;
+        }
+
+        IsEnabled = enabled;
+        return null;
+    }
 }
 
 internal sealed class FakeProcess : IEngineProcess

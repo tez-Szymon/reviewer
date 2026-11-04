@@ -14,10 +14,15 @@ public sealed class TrayTests : IDisposable
 
     public void Dispose() => _dir.Delete(recursive: true);
 
+    private readonly FakeUpdater _updater = new();
+    private readonly FakeLoginItem _loginItem = new();
+
     private MainWindowViewModel Window(FakeLauncher launcher) => new(
         _engine,
         new EngineConnection(_engine, launcher, TimeSpan.FromSeconds(2)),
         new DesktopSettings(SettingsPath),
+        _updater,
+        _loginItem,
         action => action(),
         _ => Task.CompletedTask,
         _ => Task.CompletedTask);
