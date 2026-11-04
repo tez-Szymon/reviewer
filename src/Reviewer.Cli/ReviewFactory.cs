@@ -1,4 +1,5 @@
 using System.Globalization;
+using Reviewer.Agents.Api;
 using Reviewer.Agents.Cli;
 using Reviewer.Core.Agents;
 using Reviewer.Core.Policy;
@@ -46,7 +47,7 @@ internal sealed class ReviewFactory(ReviewerPaths paths, IProcessRunner processe
             var runner = new ReviewRunner(
                 connection.Provider,
                 new ReviewContextBuilder(git, paths, TimeProvider.System),
-                Agent(effective.AgentId, effective.Agent.Model, processes),
+                Agent(effective.AgentId, effective.Agent, processes, git),
                 store);
             var policy = effective.Policy.ToReviewPolicy();
             var request = new ReviewRequest(
@@ -66,11 +67,18 @@ internal sealed class ReviewFactory(ReviewerPaths paths, IProcessRunner processe
         }
     }
 
-    /// <summary>The CLI agent for a configured agent id.</summary>
-    public static IReviewAgent Agent(string id, string? model, IProcessRunner processes) => id switch
+    /// <summary>The agent for a configured agent id, with its settings.</summary>
+    /// <param name="git">The repo the review's worktree comes from, so an API agent can read files at other commits.</param>
+    public static IReviewAgent Agent(string id, AgentSettings settings, IProcessRunner processes, IGitRepository? git = null) => id switch
     {
-        AgentsConfig.ClaudeCodeId => new ClaudeCodeAgent(new ClaudeCodeOptions(Model: model), processes),
-        AgentsConfig.CodexId => new CodexAgent(new CodexOptions(Model: model), processes),
+        AgentsConfig.ClaudeCodeId => new ClaudeCodeAgent(new ClaudeCodeOptions(Model: settings.Model), processes),
+        AgentsConfig.CodexId => new CodexAgent(new CodexOptions(Model: settings.Model), processes),
+        AgentsConfig.AnthropicApiId => new AnthropicApiAgent(
+            new AnthropicApiOptions(
+                settings.Model ?? AnthropicApiOptions.DefaultModel,
+                ct => ApiKey.ResolveAsync(new OsKeychain(processes), settings, ct),
+                ApiKey.Missing(id, settings)),
+            git),
         _ => throw new ReviewSetupException($"Unknown agent '{id}'."),
     };
 }

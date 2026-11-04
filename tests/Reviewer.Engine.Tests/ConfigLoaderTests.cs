@@ -13,6 +13,38 @@ public class ConfigLoaderTests
     private static string Error(string yaml) => Assert.Single(Assert.Throws<ConfigException>(() => ConfigLoader.Parse(yaml)).Errors);
 
     [Fact]
+    public void AnthropicApi_DefaultsToTheCurrentOpus_WithTheUsualKeyVariable()
+    {
+        var api = ReviewerConfig.Default.Agents.AnthropicApi;
+
+        Assert.Equal("claude-opus-5-5", api.Model);
+        Assert.Null(api.ApiKey);
+        Assert.Equal(1, api.MaxConcurrency);
+        Assert.Contains(AgentsConfig.AnthropicApiId, AgentsConfig.Known);
+    }
+
+    [Fact]
+    public void AnthropicApi_TakesAKeyReference_ThatDoesntChangeTheHash()
+    {
+        var plain = ConfigLoader.Parse("agents: { default: anthropic-api }");
+        var keyed = ConfigLoader.Parse("agents: { default: anthropic-api, anthropic-api: { apiKey: 'keychain:reviewer/anthropic' } }");
+
+        Assert.Equal("keychain:reviewer/anthropic", keyed.Agents.AnthropicApi.ApiKey);
+        Assert.Equal(plain.For(Api).Hash, keyed.For(Api).Hash);
+        Assert.NotEqual(plain.For(Api).Hash, ConfigLoader.Parse("agents: { default: anthropic-api, anthropic-api: { model: claude-sonnet-5-5 } }").For(Api).Hash);
+    }
+
+    [Fact]
+    public void AddingTheApiAgent_LeavesTheCliAgentsHashesAsTheyWere()
+    {
+        // Hashes are part of the job key, so a changed one would review every open PR again. A CLI agent's settings
+        // hash as they did before apiKey existed: an unset key isn't written.
+        Assert.Equal(
+            """{"maxConcurrency":1,"timeoutMinutes":15}""",
+            System.Text.Json.JsonSerializer.Serialize(ReviewerConfig.Default.Agents.ClaudeCode, ConfigLoader.JsonOptions));
+    }
+
+    [Fact]
     public void Parse_Empty_UsesBuiltInDefaults()
     {
         var config = ConfigLoader.Parse("");
@@ -264,7 +296,10 @@ public class ConfigLoaderTests
     [InlineData("accounts: [{ id: gh, host: http://github.com }]", "only https://github.com is supported")]
     [InlineData("accounts: [{ id: gh, host: https://github.com:8443 }]", "only https://github.com is supported")]
     [InlineData("accounts: [{ id: a }, { id: a }]", "accounts[1].id: 'a' is already used")]
-    [InlineData("agents: { default: gpt }", "agents.default: must be one of: claude-code, codex.")]
+    [InlineData("agents: { default: gpt }", "agents.default: must be one of: claude-code, codex, anthropic-api.")]
+    [InlineData("agents: { anthropic-api: { apiKey: sk-ant-api03-abc } }", "agents.anthropic-api.apiKey: must be a reference, env:NAME or keychain:SERVICE/ACCOUNT, never the key itself.")]
+    [InlineData("agents: { claude-code: { apiKey: 'env:ANTHROPIC_API_KEY' } }", "agents.claude-code.apiKey: only API agents take one")]
+    [InlineData("agents: { anthropic-api: { model: '' } }", "agents.anthropic-api.model: is required for an API agent.")]
     [InlineData("defaults: { triggers: { initial: [has-label] } }", "has-label needs at least one label")]
     [InlineData("defaults: { triggers: { pollSeconds: 5 } }", "defaults.triggers.pollSeconds: must be at least 15.")]
     [InlineData("repos: [{ repo: api }]", "repos[0].repo: must be owner/name.")]

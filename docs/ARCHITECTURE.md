@@ -42,7 +42,7 @@ Solution layout:
 | `Reviewer.Providers.GitHub` | GitHub REST/GraphQL adapter |
 | `Reviewer.Providers.GitLab` | GitLab REST adapter |
 | `Reviewer.Agents.Cli` | Claude Code and Codex runners (process + file contract) |
-| `Reviewer.Agents.Api` | API runners via `Microsoft.Extensions.AI` |
+| `Reviewer.Agents.Api` | API agents over `Microsoft.Extensions.AI` `IChatClient`, with the engine's own tool loop and read-only worktree tools; `anthropic-api` |
 | `Reviewer.Engine` | Generic Host, scheduler, job queue, pipeline, persistence |
 | `Reviewer.Api` | Local HTTP API on a Unix domain socket, SSE events |
 | `Reviewer.Api.Client` | The API's contract (request and response types) and `EngineClient`, without ASP.NET Core; shared by the engine, CLI and desktop |
@@ -164,9 +164,24 @@ The queue is the `Jobs` table, so it survives restarts and the CLI can add to it
 
 A usage limit is the subscription's, so a throttled job pauses its whole agent until its retry time. A job is claimed with a conditional update (`Queued`/`Throttled` → `Running`), so two processes can't both run it, and records the process id running it. Cancelling a waiting job is immediate; cancelling a running one sets `CancelRequested`, which the worker running it acts on. Stopping the engine cancels its running jobs and queues them again. A job left `Running` by a process that died is marked `Failed` when the engine starts (or `reviewer queue` lists), not re-run, since it may have published already; `reviewer queue retry` queues it again. Only one engine runs at a time: `reviewer serve` holds `engine.lock` in the data folder.
 
-### API agents (phase 2)
+### API agents
 
-Built on `Microsoft.Extensions.AI` `IChatClient`, so OpenAI, Anthropic and others share one code path. The engine owns the tool loop and offers read-only tools only: `read_file`, `list_dir`, `grep`, `git_show`. Structured output enforces the same schema.
+API agents call a model's API with the user's API key instead of running a CLI under a subscription (`Reviewer.Agents.Api`). They're built on `Microsoft.Extensions.AI` `IChatClient`, so other providers can share the code path. The first is **`anthropic-api`**: Claude through the Anthropic C# SDK (`Anthropic` on NuGet), whose `client.Beta.AsIChatClient(model)` is the chat client. The default model is `claude-opus-5-5`; any current Claude model works (the agent asks for adaptive thinking, which older ones reject).
+
+The engine owns the tool loop (`ChatReview`): no CLI, no shell, no process for the PR's code to reach. The model gets `instructions.md` as the system prompt and `context.json` and `delta.patch` in its first message, and four read-only tools over the worktree (`WorktreeTools`):
+
+| Tool | |
+|---|---|
+| `read_file` | A file with line numbers, a range of at most 1,000 lines |
+| `list_dir` | A directory, directories marked with `/` |
+| `grep` | A .NET regex over the checkout's text files, at most 100 matches; 250 ms per line |
+| `git_show` | A file at a commit SHA (the base, say), read from the engine's bare repo with `cat-file` |
+
+Every path is relative to the worktree: absolute paths, `~`, `..` and `.git` are refused, and no symbolic link is followed, so a PR can't add a link to `~/.ssh` and have it read. `git_show` takes only hex SHAs and paths that can't be read as options. Files over 2 MB and binary files aren't read, and each answer is cut at 40,000 characters. A failed tool call is answered with the error, for the model to fix; it doesn't fail the review.
+
+Each request sets `ResponseFormat` to the findings schema (structured outputs: `$schema` and numeric bounds removed, since the API doesn't enforce them; the report is validated against the full schema afterwards), `Reasoning` to high effort, and, through `RawRepresentationFactory`, top-level prompt caching (each round resends the conversation) and a server-side refusal fallback to `claude-opus-4-8`, so a request the model's safeguards decline is served by the fallback rather than failing the review. The conversation is only appended to. The loop runs until the model answers without calling tools, for at most 40 tool rounds; after that, tools are set to `none` and the model is asked for its findings. An answer that doesn't validate gets one repair round. A refusal that still stands, or an answer cut off at the 16,000-token output limit, fails the job. Each round's model, finish reason and token usage, and each tool call, go to `agent.log`; the final answer to `output.json`.
+
+The key is `agents.anthropic-api.apiKey`, a reference like an account token's (`env:NAME` or `keychain:SERVICE/ACCOUNT`), or `ANTHROPIC_API_KEY` without one; it's read when a review or a health check needs it and never written anywhere. The reference isn't part of the config hash, since it doesn't change what a review says. `CheckAsync` looks the model up in the Models API (no tokens), which checks the key and the model name. The SDK retries rate limits and overloads itself; a 429 after its retries is `Throttled` (the engine's 15-minute default, since the SDK's exception carries no retry time), 401/403 `AgentUnavailable`, and other API errors fail the job with the API's message.
 
 ### Findings schema
 
@@ -307,6 +322,7 @@ agents:
   default: claude-code
   claude-code: { maxConcurrency: 1, timeoutMinutes: 15, model: opus }
   codex:       { maxConcurrency: 1, timeoutMinutes: 15 }
+  anthropic-api: { maxConcurrency: 1, timeoutMinutes: 15, model: claude-opus-5-5, apiKey: keychain:reviewer/anthropic }   # billed to the key; without apiKey, ANTHROPIC_API_KEY
 
 defaults:                      # global policy
   triggers:

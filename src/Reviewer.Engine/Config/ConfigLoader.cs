@@ -114,7 +114,8 @@ public static partial class ConfigLoader
     /// <summary>A short, stable hash of the settings that shape a review's result.</summary>
     public static string Hash(string agentId, AgentSettings agent, PolicyConfig policy)
     {
-        var input = new HashInput(agentId, agent, policy.Review, policy.Merge, policy.Instructions);
+        // Where the API key comes from doesn't change what a review says.
+        var input = new HashInput(agentId, agent with { ApiKey = null }, policy.Review, policy.Merge, policy.Instructions);
         var bytes = SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(input, JsonOptions));
         return Convert.ToHexStringLower(bytes)[..16];
     }
@@ -290,6 +291,19 @@ public static partial class ConfigLoader
             if (settings.TimeoutMinutes is < 1 or > 24 * 60)
             {
                 errors.Add($"agents.{id}.timeoutMinutes", "must be between 1 and 1440.");
+            }
+
+            var api = AgentsConfig.ApiAgents.Contains(id);
+            if (settings.ApiKey is { } key && (!api || !TokenReference.TryParse(key, out _)))
+            {
+                errors.Add($"agents.{id}.apiKey", api
+                    ? "must be a reference, env:NAME or keychain:SERVICE/ACCOUNT, never the key itself."
+                    : "only API agents take one; a CLI agent signs in with its own login.");
+            }
+
+            if (api && string.IsNullOrWhiteSpace(settings.Model))
+            {
+                errors.Add($"agents.{id}.model", "is required for an API agent.");
             }
         }
     }

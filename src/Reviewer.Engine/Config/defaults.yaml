@@ -5,6 +5,7 @@ agents:
   default: claude-code
   claude-code: { maxConcurrency: 1, timeoutMinutes: 15 }
   codex: { maxConcurrency: 1, timeoutMinutes: 15 }
+  anthropic-api: { maxConcurrency: 1, timeoutMinutes: 15, model: claude-opus-5-5 }   # key: ANTHROPIC_API_KEY unless apiKey says
 
 defaults:
   triggers:
