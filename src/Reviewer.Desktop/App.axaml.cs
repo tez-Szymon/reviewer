@@ -1,6 +1,8 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Reviewer.Api;
@@ -13,6 +15,12 @@ namespace Reviewer.Desktop;
 
 internal sealed partial class App : Application
 {
+    /// <summary>
+    /// The tray icon, on macOS and Windows. Linux trays vary too much to rely on before the Linux desktop build, so
+    /// there closing the window still quits.
+    /// </summary>
+    private static readonly bool HasTray = OperatingSystem.IsMacOS() || OperatingSystem.IsWindows();
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
@@ -25,11 +33,20 @@ internal sealed partial class App : Application
             var model = new MainWindowViewModel(
                 client,
                 new EngineConnection(client, new EngineLauncher(paths)),
+                new DesktopSettings(Path.Combine(paths.Root, DesktopSettings.FileName)),
                 action => Dispatcher.UIThread.Post(action),
                 async uri => await window.Launcher.LaunchUriAsync(uri),
                 async folder => await window.Launcher.LaunchDirectoryInfoAsync(new DirectoryInfo(folder)));
             window.DataContext = model;
-            window.Opened += (_, _) => _ = model.RunAsync(start: true);
+            var running = false;
+            window.Opened += (_, _) =>
+            {
+                if (!running)
+                {
+                    running = true;
+                    _ = model.RunAsync(start: true);
+                }
+            };
             desktop.MainWindow = window;
 
             // Stop an engine the app started before the process goes; the lifetime waits for nothing on its own.
@@ -48,8 +65,89 @@ internal sealed partial class App : Application
                 stopped = true;
                 desktop.Shutdown();
             };
+
+            if (HasTray)
+            {
+                AddTray(desktop, window, model);
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// Closing the window hides it to the tray, so the engine the app follows (and may have started) goes on reviewing.
+    /// The tray menu, or the app menu's Quit, quits.
+    /// </summary>
+    private void AddTray(IClassicDesktopStyleApplicationLifetime desktop, Window window, MainWindowViewModel model)
+    {
+        // The window hiding mustn't end the app; quitting is always asked for.
+        desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        void Show()
+        {
+            window.Show();
+            window.WindowState = window.WindowState == WindowState.Minimized ? WindowState.Normal : window.WindowState;
+            window.Activate();
+        }
+
+        window.Closing += (_, e) =>
+        {
+            // The close button or Cmd+W; quitting closes the window as ApplicationShutdown, and that's let through.
+            if (e.CloseReason == WindowCloseReason.WindowClosing && !e.IsProgrammatic)
+            {
+                e.Cancel = true;
+                window.Hide();
+            }
+        };
+
+        var keepRunning = new NativeMenuItem("Keep the engine running after quitting")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = model.KeepEngineRunning,
+        };
+        keepRunning.Click += (_, _) => model.KeepEngineRunning = !model.KeepEngineRunning;
+
+        var open = new NativeMenuItem("Open Reviewer");
+        open.Click += (_, _) => Show();
+        var quit = new NativeMenuItem("Quit Reviewer");
+        quit.Click += (_, _) => desktop.TryShutdown();
+
+        var tray = new TrayIcon
+        {
+            Icon = new WindowIcon(AssetLoader.Open(new Uri(
+                OperatingSystem.IsMacOS() ? "avares://Reviewer.Desktop/Assets/tray-template.png" : "avares://Reviewer.Desktop/Assets/tray.png"))),
+            ToolTipText = model.TrayText,
+            Menu = [open, new NativeMenuItemSeparator(), keepRunning, new NativeMenuItemSeparator(), quit],
+        };
+
+        // The menu bar tints a template icon for light and dark, as it does its own.
+        MacOSProperties.SetIsTemplateIcon(tray, true);
+        tray.Clicked += (_, _) => Show();
+        model.PropertyChanged += (_, e) =>
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(MainWindowViewModel.TrayText):
+                    tray.ToolTipText = model.TrayText;
+                    break;
+                case nameof(MainWindowViewModel.KeepEngineRunning):
+                    keepRunning.IsChecked = model.KeepEngineRunning;
+                    break;
+            }
+        };
+        TrayIcon.SetIcons(this, [tray]);
+
+        // Clicking the Dock icon while the window is hidden brings it back, as Mac apps do.
+        if (TryGetFeature(typeof(IActivatableLifetime)) is IActivatableLifetime activatable)
+        {
+            activatable.Activated += (_, e) =>
+            {
+                if (e.Kind == ActivationKind.Reopen)
+                {
+                    Show();
+                }
+            };
+        }
     }
 }

@@ -404,11 +404,11 @@ The account endpoints use the providers `reviewer serve`'s scheduler keeps, one 
 
 The CLI and the desktop app share one client, `EngineClient` in `Reviewer.Api.Client` (behind `IEngineClient`, so view models test against a fake), and the engine's own request and response types, so there is no generated code to keep in step. The OpenAPI spec stays for other clients.
 
-**Engine lifetime.** The desktop app uses an engine already listening on the socket, or starts `reviewer serve` as a child process and waits up to 20 seconds for its API. The CLI is `REVIEWER_CLI` when set, otherwise the one beside the app (the build puts it there), otherwise the first on `PATH`. The engine's output is appended to `engine.log` in the data folder.
+**Engine lifetime.** The desktop app uses an engine already listening on the socket, or starts `reviewer serve` as a child process and waits up to 20 seconds for its API. The CLI is `REVIEWER_CLI` when set, otherwise the one beside the app (the build puts it there), otherwise the first on `PATH`. It runs as `reviewer serve --log <data folder>/engine.log`: the engine appends its own output to the file, with nothing piped to the app, so it can outlive the app.
 
-Quitting the app stops an engine it started: `POST /shutdown`, which requeues a running review as Ctrl+C does, and a kill if the engine hasn't exited within 15 seconds. An engine started elsewhere, such as `reviewer serve` in a terminal, keeps running. If the event stream breaks, the app says it lost the engine, looks for one every 3 seconds, and resumes the stream after the last version it saw. "Start engine" starts one.
+Quitting the app stops an engine it started: `POST /shutdown`, which requeues a running review as Ctrl+C does, and a kill if the engine hasn't exited within 15 seconds. With "Keep the engine running after quitting" ticked (in the tray menu and the window's status bar, saved in `desktop.json` in the data folder, apart from `config.yaml`), it's left up instead, and the app finds it on the socket the next time it starts. An engine started elsewhere, such as `reviewer serve` in a terminal, always keeps running. If the event stream breaks, the app says it lost the engine, looks for one every 3 seconds, and resumes the stream after the last version it saw. "Start engine" starts one.
 
-Planned with the tray icon: "start at login" (LaunchAgent on macOS, Startup entry on Windows), closing the window to the tray, and "keep running" to leave a started engine up on quit.
+**Tray icon.** On macOS and Windows the app has a tray icon (Avalonia's `TrayIcon`; a template image on macOS, which the menu bar tints for light and dark). Its tooltip says what the queue holds ("1 reviewing, 2 queued", "idle") or why there's no engine; its menu opens the window, toggles keep running, and quits. Closing the window hides it to the tray, so the app keeps following the engine; Quit in the tray menu or the app menu quits, and on macOS clicking the Dock icon shows the window again. On Linux, whose trays vary, closing the window still quits until the Linux desktop build. "Start at login" (LaunchAgent on macOS, Startup entry on Windows) comes with the installers in M4.
 
 **Desktop app (Avalonia).**
 
@@ -437,7 +437,7 @@ reviewer watch [--after <version>]  # job changes as the engine reports them
 reviewer history | show <job-id>
 reviewer repos add <url> | list
 reviewer config validate | show [repo]
-reviewer serve                      # run the engine headless
+reviewer serve [--log <file>]       # run the engine headless; --log appends its output to a file
 ```
 
 ## Storage, secrets and security

@@ -18,7 +18,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     private readonly Func<Uri, Task> _openUri;
     private readonly Func<string, Task> _openFolder;
     private readonly Stack<PageViewModel> _back = new();
+    private readonly DesktopSettings _settings;
     private CancellationTokenSource _run = new();
+
+    /// <summary>Quitting leaves an engine the app started running; saved in <c>desktop.json</c>.</summary>
+    [ObservableProperty]
+    private bool _keepEngineRunning;
+
+    /// <summary>Why the app's preferences couldn't be saved.</summary>
+    [ObservableProperty]
+    private string? _preferencesProblem;
 
     [ObservableProperty]
     private PageViewModel _current;
@@ -27,18 +36,40 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     private PageViewModel _selectedPage;
 
     public MainWindowViewModel(
-        IEngineClient client, EngineConnection engine, Action<Action> post, Func<Uri, Task> openUri, Func<string, Task> openFolder)
+        IEngineClient client,
+        EngineConnection engine,
+        DesktopSettings settings,
+        Action<Action> post,
+        Func<Uri, Task> openUri,
+        Func<string, Task> openFolder)
     {
         _client = client;
         Engine = engine;
+        _settings = settings;
+        _keepEngineRunning = settings.Load().KeepEngineRunning;
         _openUri = openUri;
         _openFolder = openFolder;
         var config = new ConfigDocument(client);
+        Queue = new QueueViewModel(client, this);
         Pages =
         [
-            new QueueViewModel(client, this), new PullsViewModel(client, this), new HistoryViewModel(client, this),
+            Queue, new PullsViewModel(client, this), new HistoryViewModel(client, this),
             new ReposViewModel(client, config), new SettingsViewModel(client, config),
         ];
+        Queue.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(QueueViewModel.Activity))
+            {
+                OnPropertyChanged(nameof(TrayText));
+            }
+        };
+        Engine.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(EngineConnection.Description))
+            {
+                OnPropertyChanged(nameof(TrayText));
+            }
+        };
         _selectedPage = _current = Pages[0];
 
         _feed = new JobFeed(client, post);
@@ -65,6 +96,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     public EngineConnection Engine { get; }
 
     public IReadOnlyList<PageViewModel> Pages { get; }
+
+    public QueueViewModel Queue { get; }
+
+    /// <summary>The tray icon's tooltip: what the engine is doing, or why there's none.</summary>
+    public string TrayText => Engine.IsConnected ? $"Reviewer: {Queue.Activity}" : $"Reviewer: {Engine.Description}";
 
     /// <summary>Connects, starting the engine when <paramref name="start"/>, then follows its events until it goes away.</summary>
     public async Task RunAsync(bool start)
@@ -122,12 +158,20 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
 
     public Task OpenFolderAsync(string path) => _openFolder(path);
 
-    /// <summary>Stops following the engine, and stops the engine if the app started it.</summary>
+    /// <summary>
+    /// Stops following the engine, and stops the engine if the app started it, unless <see cref="KeepEngineRunning"/>:
+    /// then it goes on reviewing, and the app finds it on the socket the next time it starts.
+    /// </summary>
     public async Task ShutdownAsync()
     {
         await _run.CancelAsync();
-        await Engine.StopAsync();
+        if (!KeepEngineRunning)
+        {
+            await Engine.StopAsync();
+        }
     }
+
+    partial void OnKeepEngineRunningChanged(bool value) => PreferencesProblem = _settings.Save(new DesktopPreferences(value));
 
     public void Dispose()
     {
