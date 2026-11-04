@@ -82,15 +82,19 @@ internal sealed class LaunchAgentLoginItem(string plistPath, string executable) 
     }
 
     /// <summary>The app bundle the executable is in, if it's in one.</summary>
+    /// <remarks>
+    /// A macOS path, split on <c>/</c> itself: <see cref="Path"/> would use the separators of the OS it runs on.
+    /// </remarks>
     internal static string? Bundle(string executable)
     {
         // <bundle>.app/Contents/MacOS/<executable>
-        var macOS = Path.GetDirectoryName(executable);
-        var contents = macOS is null ? null : Path.GetDirectoryName(macOS);
-        var bundle = contents is null ? null : Path.GetDirectoryName(contents);
-        return bundle is not null && bundle.EndsWith(".app", StringComparison.OrdinalIgnoreCase)
-            && Path.GetFileName(macOS) == "MacOS" && Path.GetFileName(contents) == "Contents"
-                ? bundle
+        var parts = executable.Split('/');
+        return parts.Length >= 4
+            && parts[^2] == "MacOS"
+            && parts[^3] == "Contents"
+            && parts[^4].EndsWith(".app", StringComparison.OrdinalIgnoreCase)
+            && parts[^4].Length > ".app".Length
+                ? string.Join('/', parts[..^3])
                 : null;
     }
 
