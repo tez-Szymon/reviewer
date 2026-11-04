@@ -33,7 +33,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
         Engine = engine;
         _openUri = openUri;
         _openFolder = openFolder;
-        Pages = [new QueueViewModel(client, this), new PullsViewModel(client, this), new HistoryViewModel(client, this)];
+        var config = new ConfigDocument(client);
+        Pages =
+        [
+            new QueueViewModel(client, this), new PullsViewModel(client, this), new HistoryViewModel(client, this),
+            new ReposViewModel(client, config), new SettingsViewModel(client, config),
+        ];
         _selectedPage = _current = Pages[0];
 
         _feed = new JobFeed(client, post);
@@ -91,6 +96,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     {
         _back.Clear();
         Current = value;
+        if (value.ReloadWhenShown && Engine.IsConnected)
+        {
+            _ = value.LoadAsync();
+        }
     }
 
     public void OpenJob(string id)

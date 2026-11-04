@@ -1,3 +1,6 @@
+using System.Net;
+using Reviewer.Engine.Config;
+
 namespace Reviewer.Api;
 
 /// <summary>What clients ask of the engine's local API; <see cref="EngineClient"/> asks it over the socket.</summary>
@@ -10,6 +13,22 @@ public interface IEngineClient
     Task<List<AgentStatus>> GetAgentsAsync(CancellationToken ct);
 
     Task<List<AccountDto>> GetAccountsAsync(CancellationToken ct);
+
+    Task<AccountStatus> GetAccountStatusAsync(string id, CancellationToken ct);
+
+    /// <param name="owner">A user, organization or GitLab group whose repos to list; null lists all the account can see.</param>
+    Task<List<RepoChoice>> ListAccountReposAsync(string id, string? owner, CancellationToken ct);
+
+    /// <summary><c>config.yaml</c> as written, with the hash an edit must name.</summary>
+    Task<ConfigText> GetConfigFileAsync(CancellationToken ct);
+
+    /// <summary>Applies the edits, all or none, and returns the saved file.</summary>
+    /// <remarks>
+    /// Throws <see cref="EngineApiException"/> with <see cref="HttpStatusCode.Conflict"/> when the file changed since it
+    /// was read, and <see cref="HttpStatusCode.UnprocessableEntity"/> with <see cref="EngineApiException.Errors"/> when
+    /// the result would be invalid.
+    /// </remarks>
+    Task<ConfigText> EditConfigAsync(ConfigEdits edits, CancellationToken ct);
 
     Task<List<JobDto>> GetQueueAsync(CancellationToken ct);
 

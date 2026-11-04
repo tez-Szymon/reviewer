@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Reviewer.Api;
 using Reviewer.Desktop.Services;
+using Reviewer.Engine.Config;
 using Reviewer.Engine.State;
 
 namespace Reviewer.Desktop.Tests;
@@ -42,9 +43,57 @@ internal sealed class FakeEngine : IEngineClient
 
     public Task<EngineStatus?> GetStatusAsync(CancellationToken ct) => Task.FromResult(Status);
 
-    public Task<List<AgentStatus>> GetAgentsAsync(CancellationToken ct) => Task.FromResult(new List<AgentStatus>());
+    public List<AgentStatus> Agents { get; } = [];
+
+    /// <summary><c>config.yaml</c> as the engine has it; tests change it to play a hand edit.</summary>
+    public string ConfigYaml { get; set; } = "";
+
+    /// <summary>The edits each save sent, in order.</summary>
+    public List<IReadOnlyList<ConfigEdit>> Saves { get; } = [];
+
+    public Dictionary<string, AccountStatus> AccountStatuses { get; } = [];
+
+    public List<RepoChoice> RepoChoices { get; } = [];
+
+    public Task<List<AgentStatus>> GetAgentsAsync(CancellationToken ct) => Task.FromResult(Agents);
 
     public Task<List<AccountDto>> GetAccountsAsync(CancellationToken ct) => Task.FromResult(Accounts);
+
+    public Task<AccountStatus> GetAccountStatusAsync(string id, CancellationToken ct) =>
+        Task.FromResult(AccountStatuses.GetValueOrDefault(id) ?? new AccountStatus(id, true, "octocat", null));
+
+    public Task<List<RepoChoice>> ListAccountReposAsync(string id, string? owner, CancellationToken ct)
+    {
+        Calls.Add($"repos {id} {owner}");
+        return Task.FromResult(RepoChoices.ToList());
+    }
+
+    public Task<ConfigText> GetConfigFileAsync(CancellationToken ct) => Task.FromResult(new ConfigText(ConfigYaml, Hash(ConfigYaml)));
+
+    /// <summary>Edits as the engine does: the hash must match, and the result must be valid.</summary>
+    public Task<ConfigText> EditConfigAsync(ConfigEdits edits, CancellationToken ct)
+    {
+        if (edits.BaseHash != Hash(ConfigYaml))
+        {
+            return Task.FromException<ConfigText>(new EngineApiException(HttpStatusCode.Conflict, "config.yaml changed since it was read."));
+        }
+
+        try
+        {
+            var yaml = ConfigEditor.Apply(ConfigYaml, edits.Edits);
+            ConfigLoader.Parse(yaml);
+            ConfigYaml = yaml;
+        }
+        catch (ConfigException e)
+        {
+            return Task.FromException<ConfigText>(new EngineApiException(HttpStatusCode.UnprocessableEntity, e.Errors[0], e.Errors));
+        }
+
+        Saves.Add(edits.Edits);
+        return GetConfigFileAsync(ct);
+    }
+
+    private static string Hash(string yaml) => yaml.GetHashCode(StringComparison.Ordinal).ToString("x", System.Globalization.CultureInfo.InvariantCulture);
 
     public Task<List<JobDto>> GetQueueAsync(CancellationToken ct) => Load(Queue);
 

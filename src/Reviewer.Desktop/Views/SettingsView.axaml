@@ -1,0 +1,92 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             x:Class="Reviewer.Desktop.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" IsEnabled="{Binding CanEdit}">
+          <Button Content="Revert" Command="{Binding RevertCommand}" />
+          <Button Classes="accent" Content="Save" Command="{Binding SaveCommand}" />
+        </StackPanel>
+        <TextBlock Classes="title" Text="Settings" />
+      </DockPanel>
+      <TextBlock Classes="muted" TextWrapping="Wrap"
+                 Text="Saving edits only the keys you changed in config.yaml. Untick a setting to go back to the built-in value; repos override these in Repos." />
+      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+      <ItemsControl ItemsSource="{Binding Problems}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="x:String"><TextBlock Classes="error" Text="{Binding}" /></DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+
+    <ScrollViewer>
+      <StackPanel x:Name="Page" Spacing="12" MaxWidth="980" HorizontalAlignment="Left" Margin="0,0,12,0">
+        <Border Classes="card">
+          <StackPanel Spacing="8">
+            <TextBlock FontWeight="SemiBold" Text="Accounts" />
+            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding ImplicitAccount}"
+                       Text="No accounts in config.yaml, so github.com is used with GITHUB_TOKEN, GH_TOKEN or gh auth login. Adding an account replaces it." />
+            <ItemsControl ItemsSource="{Binding Accounts}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:AccountItem">
+                  <DockPanel Margin="0,4">
+                    <Button DockPanel.Dock="Right" Content="Remove" IsVisible="{Binding CanRemove}"
+                            Command="{Binding #Page.((vm:SettingsViewModel)DataContext).RemoveAccountCommand}" CommandParameter="{Binding}" />
+                    <StackPanel>
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Id}" />
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding Details}" />
+                      <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding Status}" />
+                    </StackPanel>
+                  </DockPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <WrapPanel IsEnabled="{Binding CanEdit}">
+              <TextBox Width="140" Margin="0,0,8,8" PlaceholderText="Id, e.g. gh-main" Text="{Binding NewAccountId}" />
+              <ComboBox Width="110" Margin="0,0,8,8" ItemsSource="{x:Static vm:SettingsViewModel.Providers}" SelectedItem="{Binding NewProvider}" />
+              <TextBox Width="240" Margin="0,0,8,8" PlaceholderText="Host (optional), e.g. https://gitlab.example.com" Text="{Binding NewHost}" />
+              <TextBox Width="240" Margin="0,0,8,8" PlaceholderText="Token reference, e.g. keychain:reviewer/gh-main" Text="{Binding NewToken}"
+                       ToolTip.Tip="env:NAME or keychain:SERVICE/ACCOUNT. Never the token itself: add it with the OS's own tool." />
+              <Button Margin="0,0,8,8" Content="Add account" Command="{Binding AddAccountCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="card">
+          <StackPanel Spacing="8">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Content="Check again" Command="{Binding CheckAgentsCommand}" />
+              <TextBlock FontWeight="SemiBold" VerticalAlignment="Center" Text="Agent health" />
+            </DockPanel>
+            <ItemsControl ItemsSource="{Binding Agents}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:AgentItem">
+                  <Grid ColumnDefinitions="140,*" Margin="0,2">
+                    <TextBlock FontWeight="SemiBold" Text="{Binding Id}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Status}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <ItemsControl ItemsSource="{Binding AgentSettings}" IsEnabled="{Binding CanEdit}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="12" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
+
+        <TextBlock Classes="title" FontSize="18" Text="Global policy" />
+        <ItemsControl ItemsSource="{Binding Policy}" IsEnabled="{Binding CanEdit}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="12" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>
