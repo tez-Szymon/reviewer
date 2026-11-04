@@ -213,7 +213,14 @@ internal static class SettingSpecs
         .. AgentsConfig.Known.Select(id => (id, (IReadOnlyList<FieldSpec>)[
             new($"{id}.maxConcurrency", "Reviews at once", FieldKind.WholeNumber),
             new($"{id}.timeoutMinutes", "Timeout (minutes)", FieldKind.WholeNumber),
-            new($"{id}.model", "Model", FieldKind.Text, Hint: "Empty uses the CLI's own default"),
+            .. AgentsConfig.ApiAgents.Contains(id)
+                ? (FieldSpec[])
+                [
+                    new($"{id}.model", "Model", FieldKind.Text, Hint: "Required; billed to the API key"),
+                    new($"{id}.apiKey", "API key reference", FieldKind.Text,
+                        Hint: "env:NAME or keychain:SERVICE/ACCOUNT, never the key itself; empty reads ANTHROPIC_API_KEY"),
+                ]
+                : [new($"{id}.model", "Model", FieldKind.Text, Hint: "Empty uses the CLI's own default")],
         ])),
     ];
 

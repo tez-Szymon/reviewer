@@ -152,9 +152,19 @@ var status = new Command("status", "Show agent health and each account's sign-in
 status.SetAction(async (_, ct) =>
 {
     var ready = new HashSet<string>();
+    AgentsConfig agents;
+    try
+    {
+        agents = (await ConfigLoader.LoadAsync(paths.Config, ct)).Agents;
+    }
+    catch (ConfigException)
+    {
+        agents = ReviewerConfig.Default.Agents; // Reported with the config below.
+    }
+
     foreach (var id in AgentsConfig.Known)
     {
-        var health = await ReviewFactory.Agent(id, null, runner).CheckAsync(ct);
+        var health = await ReviewFactory.Agent(id, agents.Get(id), runner).CheckAsync(ct);
         if (health.IsReady)
         {
             ready.Add(id);
@@ -395,7 +405,7 @@ serve.SetAction(async (parse, ct) =>
                 new EngineServices(
                     paths,
                     store,
-                    [.. AgentsConfig.Known.Select(id => ReviewFactory.Agent(id, null, runner))],
+                    [.. AgentsConfig.Known.Select(id => ReviewFactory.Agent(id, config.Agents.Get(id), runner))],
                     worker.Wake,
                     TimeProvider.System,
                     DateTimeOffset.UtcNow,

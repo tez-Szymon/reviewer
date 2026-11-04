@@ -73,23 +73,35 @@ public sealed record AccountConfig(string Id, string Provider, Uri Host, string?
 public sealed record AgentsConfig(
     string Default,
     [property: JsonPropertyName(AgentsConfig.ClaudeCodeId)] AgentSettings ClaudeCode,
-    [property: JsonPropertyName(AgentsConfig.CodexId)] AgentSettings Codex)
+    [property: JsonPropertyName(AgentsConfig.CodexId)] AgentSettings Codex,
+    [property: JsonPropertyName(AgentsConfig.AnthropicApiId)] AgentSettings AnthropicApi)
 {
     public const string ClaudeCodeId = "claude-code";
     public const string CodexId = "codex";
 
-    public static IReadOnlyList<string> Known { get; } = [ClaudeCodeId, CodexId];
+    /// <summary>Claude through the Anthropic API, billed to an API key rather than a subscription.</summary>
+    public const string AnthropicApiId = "anthropic-api";
+
+    public static IReadOnlyList<string> Known { get; } = [ClaudeCodeId, CodexId, AnthropicApiId];
+
+    /// <summary>The agents that call a model's API with a key, rather than run a CLI under a subscription.</summary>
+    public static IReadOnlyList<string> ApiAgents { get; } = [AnthropicApiId];
 
     public AgentSettings Get(string id) => id switch
     {
         ClaudeCodeId => ClaudeCode,
         CodexId => Codex,
+        AnthropicApiId => AnthropicApi,
         _ => throw new ArgumentOutOfRangeException(nameof(id), id, "Unknown agent."),
     };
 }
 
-/// <param name="Model">Model alias or name for the CLI; null uses the CLI's own default.</param>
-public sealed record AgentSettings(int MaxConcurrency, int TimeoutMinutes, string? Model = null)
+/// <param name="Model">Model alias or name for the CLI; null uses the CLI's own default. API agents need one.</param>
+/// <param name="ApiKey">
+/// API agents only: a reference to the API key (<c>env:NAME</c> or <c>keychain:SERVICE/ACCOUNT</c>), never the key
+/// itself. Null reads the provider's usual variable, <c>ANTHROPIC_API_KEY</c>.
+/// </param>
+public sealed record AgentSettings(int MaxConcurrency, int TimeoutMinutes, string? Model = null, string? ApiKey = null)
 {
     [JsonIgnore]
     public TimeSpan Timeout => TimeSpan.FromMinutes(TimeoutMinutes);

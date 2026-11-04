@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Reviewer.Agents.Api/Reviewer.Agents.Api.csproj" />
     <Project Path="src/Reviewer.Agents.Cli/Reviewer.Agents.Cli.csproj" />
     <Project Path="src/Reviewer.Api/Reviewer.Api.csproj" />
     <Project Path="src/Reviewer.Api.Client/Reviewer.Api.Client.csproj" />
@@ -13,6 +14,7 @@
     <Project Path="src/Reviewer.Providers.GitLab/Reviewer.Providers.GitLab.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Reviewer.Agents.Api.Tests/Reviewer.Agents.Api.Tests.csproj" />
     <Project Path="tests/Reviewer.Agents.Cli.Tests/Reviewer.Agents.Cli.Tests.csproj" />
     <Project Path="tests/Reviewer.Api.Tests/Reviewer.Api.Tests.csproj" />
     <Project Path="tests/Reviewer.Cli.Tests/Reviewer.Cli.Tests.csproj" />

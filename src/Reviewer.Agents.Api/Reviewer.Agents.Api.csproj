@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- API agents: the engine runs the tool loop over Microsoft.Extensions.AI's IChatClient, with read-only tools. -->
+  <ItemGroup>
+    <PackageReference Include="Anthropic" />
+    <InternalsVisibleTo Include="Reviewer.Agents.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
+    <ProjectReference Include="..\Reviewer.Git\Reviewer.Git.csproj" />
+  </ItemGroup>
+</Project>

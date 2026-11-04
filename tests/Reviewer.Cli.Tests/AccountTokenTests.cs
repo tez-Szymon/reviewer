@@ -69,3 +69,48 @@ public class AccountTokenTests
             StringComparison.Ordinal);
     }
 }
+
+public class ApiKeyTests
+{
+    private static CancellationToken Ct => CancellationToken.None;
+
+    private static AgentSettings Settings(string? apiKey) => new(1, 15, "claude-opus-5-5", apiKey);
+
+    [Fact]
+    public async Task Resolve_KeychainReference_ReadsTheItem()
+    {
+        var keychain = new FakeKeychain(new() { ["reviewer/anthropic"] = "sk-ant-keychain" });
+
+        Assert.Equal("sk-ant-keychain", await ApiKey.ResolveAsync(keychain, Settings("keychain:reviewer/anthropic"), Ct));
+        Assert.Null(await ApiKey.ResolveAsync(new FakeKeychain([]), Settings("keychain:reviewer/anthropic"), Ct));
+    }
+
+    [Fact]
+    public async Task Resolve_EnvReference_ReadsThatVariable_AndWithoutOne_TheUsualVariable()
+    {
+        var name = $"REVIEWER_TEST_KEY_{Guid.NewGuid():N}";
+        Environment.SetEnvironmentVariable(name, "sk-ant-env");
+        try
+        {
+            Assert.Equal("sk-ant-env", await ApiKey.ResolveAsync(new FakeKeychain([]), Settings($"env:{name}"), Ct));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
+
+        Assert.Equal(Environment.GetEnvironmentVariable(ApiKey.DefaultVariable) is { Length: > 0 } set ? set : null,
+            await ApiKey.ResolveAsync(new FakeKeychain([]), Settings(null), Ct));
+    }
+
+    [Fact]
+    public void Missing_SaysWhereTheKeyWasLookedFor()
+    {
+        Assert.StartsWith("No API key for anthropic-api: set ANTHROPIC_API_KEY, or give agents.anthropic-api.apiKey a reference",
+            ApiKey.Missing("anthropic-api", Settings(null)), StringComparison.Ordinal);
+        Assert.Equal("No API key for anthropic-api: it's read from environment variable WORK_KEY, which is not set.",
+            ApiKey.Missing("anthropic-api", Settings("env:WORK_KEY")));
+        Assert.Contains(OsKeychain.AddCommand(new TokenReference.Keychain("reviewer", "anthropic")),
+            ApiKey.Missing("anthropic-api", Settings("keychain:reviewer/anthropic")), StringComparison.Ordinal);
+    }
+}
