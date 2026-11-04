@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The local API's contract and its client, without ASP.NET Core: shared by the engine, the CLI and the desktop app. -->
+  <PropertyGroup>
+    <RootNamespace>Reviewer.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Reviewer.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Reviewer.Core\Reviewer.Core.csproj" />
+    <ProjectReference Include="..\Reviewer.Engine\Reviewer.Engine.csproj" />
+  </ItemGroup>
+
+</Project>

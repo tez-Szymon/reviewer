@@ -377,6 +377,7 @@ serve.SetAction(async (_, ct) =>
             using var worker = new QueueWorker(
                 store, new QueueLauncher(paths, new ReviewFactory(paths, runner, store, home), config, Log), TimeProvider.System, Log);
             using var source = new PollSource(paths, runner);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct); // Ctrl+C, or the desktop app asking.
             var scheduler = new Scheduler(store, source, TimeProvider.System, worker.Wake, Log);
             var api = await StartApiAsync(
                 new EngineServices(
@@ -386,12 +387,15 @@ serve.SetAction(async (_, ct) =>
                     worker.Wake,
                     TimeProvider.System,
                     DateTimeOffset.UtcNow,
-                    source.GetProviderAsync),
+                    source.GetProviderAsync)
+                {
+                    Stop = stop.Cancel,
+                },
                 ct);
             Log($"Engine started on {paths.Root}, watching {config.Repos.Count} repo(s); Ctrl+C stops it.");
             try
             {
-                await Task.WhenAll(worker.RunAsync(ct), scheduler.RunAsync(ct));
+                await Task.WhenAll(worker.RunAsync(stop.Token), scheduler.RunAsync(stop.Token));
             }
             finally
             {
@@ -438,7 +442,7 @@ watch.SetAction(async (parse, ct) =>
     using var client = new EngineClient(paths.Socket);
     try
     {
-        await foreach (var job in client.WatchJobsAsync(parse.GetValue(watchAfter), ct))
+        await foreach (var job in client.WatchJobsAsync(parse.GetValue(watchAfter), null, ct))
         {
             HistoryPrinter.PrintChange(job, Console.Out);
         }

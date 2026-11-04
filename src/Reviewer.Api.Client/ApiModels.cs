@@ -95,9 +95,10 @@ public sealed record FindingDto(
 }
 
 /// <summary>A job with its findings, in report order.</summary>
-public sealed record JobDetailsDto(JobDto Job, IReadOnlyList<FindingDto> Findings)
+/// <param name="Reasons">Why the policy decided as it did, from the attempt's plan; empty before the agent finished.</param>
+public sealed record JobDetailsDto(JobDto Job, IReadOnlyList<FindingDto> Findings, IReadOnlyList<string> Reasons)
 {
-    public static JobDetailsDto From(JobDetails d) => new(JobDto.From(d.Job), [.. d.Findings.Select(FindingDto.From)]);
+    public static JobDetailsDto From(JobDetails d, IReadOnlyList<string> reasons) => new(JobDto.From(d.Job), [.. d.Findings.Select(FindingDto.From)], reasons);
 }
 
 /// <summary>The PR's last published review: what the next one starts from.</summary>
@@ -163,7 +164,8 @@ public static class ApiJson
 {
     public static JsonSerializerOptions Options { get; } = Configure(new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
-    internal static JsonSerializerOptions Configure(JsonSerializerOptions options)
+    /// <summary>Adds the API's conventions to <paramref name="options"/>, as the engine configures its own.</summary>
+    public static JsonSerializerOptions Configure(JsonSerializerOptions options)
     {
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.KebabCaseLower));
         return options;

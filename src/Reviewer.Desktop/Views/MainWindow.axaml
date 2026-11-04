@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Reviewer.Desktop.ViewModels"
+        x:Class="Reviewer.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Reviewer"
+        Width="1100" Height="720" MinWidth="720" MinHeight="480">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Padding="16,8"
+            Background="{DynamicResource CautionBrush}"
+            IsVisible="{Binding !Engine.IsConnected}">
+      <DockPanel>
+        <Button DockPanel.Dock="Right" Content="Start engine"
+                IsVisible="{Binding Engine.IsUnavailable}"
+                Command="{Binding StartEngineCommand}" />
+        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="{Binding Engine.Description}" />
+      </DockPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Padding="16,4">
+      <TextBlock Classes="muted" FontSize="12" Text="{Binding Engine.Description}" IsVisible="{Binding Engine.IsConnected}" />
+    </Border>
+
+    <ListBox DockPanel.Dock="Left" Width="180" Margin="8"
+             ItemsSource="{Binding Pages}"
+             SelectedItem="{Binding SelectedPage}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:PageViewModel">
+          <TextBlock Text="{Binding Title}" Padding="4" />
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <ContentControl Margin="16" Content="{Binding Current}" />
+  </DockPanel>
+</Window>

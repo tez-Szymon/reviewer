@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             x:Class="Reviewer.Desktop.Views.HistoryView"
+             x:DataType="vm:HistoryViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
+      <TextBlock Classes="title" Text="History" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBox Width="260" PlaceholderText="Filter by repo" Text="{Binding RepoFilter}" />
+        <ComboBox Width="200" ItemsSource="{x:Static vm:HistoryViewModel.Outcomes}" SelectedItem="{Binding Outcome}" />
+        <Button Content="Refresh" Command="{Binding RefreshCommand}" />
+      </StackPanel>
+      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    </StackPanel>
+    <ListBox x:Name="List" ItemsSource="{Binding Jobs}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:JobItem">
+          <Grid ColumnDefinitions="2*,2*,2*,*,90,Auto" ColumnSpacing="12">
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock FontWeight="SemiBold" Text="{Binding Pr}" />
+              <TextBlock Classes="muted" FontSize="12" Text="{Binding Id}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+              <TextBlock TextWrapping="Wrap" Text="{Binding StateText}" />
+              <TextBlock Classes="error" FontSize="12" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Classes="muted" TextWrapping="Wrap" Text="{Binding CountsText}" />
+            <TextBlock Grid.Column="3" VerticalAlignment="Center" Classes="muted" Text="{Binding Job.AgentId}" />
+            <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="muted" Text="{Binding When}" />
+            <Button Grid.Column="5" Content="Open"
+                    Command="{Binding #List.((vm:HistoryViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</UserControl>

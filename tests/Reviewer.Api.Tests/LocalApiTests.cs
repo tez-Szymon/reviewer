@@ -25,6 +25,7 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
     private int _wakes;
     private readonly FakeProvider _provider = new();
     private Exception? _connectError;
+    private int _stops;
 
     private static CancellationToken Ct => CancellationToken.None;
 
@@ -36,7 +37,10 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
         _store = await ReviewStore.OpenAsync(_paths.Database, TimeProvider.System, Ct);
         var engine = new EngineServices(
             _paths, _store, [new FakeAgent()], () => Interlocked.Increment(ref _wakes), TimeProvider.System, DateTimeOffset.UtcNow,
-            (_, _) => _connectError is { } e ? Task.FromException<IRepositoryProvider>(e) : Task.FromResult<IRepositoryProvider>(_provider));
+            (_, _) => _connectError is { } e ? Task.FromException<IRepositoryProvider>(e) : Task.FromResult<IRepositoryProvider>(_provider))
+        {
+            Stop = () => Interlocked.Increment(ref _stops),
+        };
         _app = await LocalApi.StartAsync(engine, _paths.Socket, log: null, Ct, eventPollInterval: TimeSpan.FromMilliseconds(50));
         _client = new EngineClient(_paths.Socket);
     }
@@ -445,6 +449,40 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task Job_CarriesThePolicyReasons_FromItsPlan()
+    {
+        var attempt = Directory.CreateDirectory(Path.Combine(_dir.FullName, "jobs", "j1", "attempt-1")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(attempt, "plan.json"), """{ "reasons": ["No blocking findings.", "Mode Gate: Approve."] }""", Ct);
+        var job = Job("j1");
+        job.AttemptFolder = attempt;
+        await _store.StartJobAsync(job, Ct);
+        await _store.StartJobAsync(Job("j2", number: 8), Ct);
+
+        var withPlan = await _client.GetJobAsync("j1", Ct);
+        var withoutPlan = await _client.GetJobAsync("j2", Ct);
+
+        Assert.Equal(["No blocking findings.", "Mode Gate: Approve."], withPlan!.Reasons);
+        Assert.Empty(withoutPlan!.Reasons);
+        Assert.Null(await _client.GetJobAsync("nope", Ct));
+    }
+
+    [Fact]
+    public async Task Shutdown_StopsTheEngine()
+    {
+        await _client.ShutdownAsync(Ct);
+
+        Assert.Equal(1, _stops);
+    }
+
+    [Fact]
+    public async Task Client_RaisesTheEnginesProblemDetail()
+    {
+        var e = await Assert.ThrowsAsync<EngineApiException>(() => _client.CancelJobAsync("nope", Ct));
+
+        Assert.Equal(HttpStatusCode.NotFound, e.Status);
+    }
+
+    [Fact]
     public async Task OpenApi_DescribesTheEndpoints()
     {
         using var spec = JsonDocument.Parse(await Http.GetStringAsync("openapi/v1.json", Ct));
@@ -458,7 +496,7 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
         await _store.EnqueueAsync(Job("old"), Ct);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
-        await using var events = _client.WatchJobsAsync(after: null, timeout.Token).GetAsyncEnumerator(timeout.Token);
+        await using var events = _client.WatchJobsAsync(after: null, opened: null, timeout.Token).GetAsyncEnumerator(timeout.Token);
         var next = events.MoveNextAsync();
         await Task.Delay(200, Ct); // Let the stream pick its starting point before anything changes.
 
@@ -483,7 +521,7 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
 
-        await using var events = _client.WatchJobsAsync(after: first, timeout.Token).GetAsyncEnumerator(timeout.Token);
+        await using var events = _client.WatchJobsAsync(after: first, opened: null, timeout.Token).GetAsyncEnumerator(timeout.Token);
 
         Assert.True(await events.MoveNextAsync());
         Assert.Equal("j2", events.Current.Id);
@@ -494,7 +532,7 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
     {
         var stream = Task.Run(async () =>
         {
-            await foreach (var _ in _client.WatchJobsAsync(after: null, Ct))
+            await foreach (var _ in _client.WatchJobsAsync(after: null, opened: null, Ct))
             {
             }
         }, Ct);

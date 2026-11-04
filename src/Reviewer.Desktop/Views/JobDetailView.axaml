@@ -1,0 +1,75 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             x:Class="Reviewer.Desktop.Views.JobDetailView"
+             x:DataType="vm:JobDetailViewModel">
+  <ScrollViewer>
+    <StackPanel Spacing="12" MaxWidth="980" HorizontalAlignment="Left">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Content="Back" Command="{Binding BackCommand}" />
+        <Button Content="Open PR" Command="{Binding OpenPullRequestCommand}" />
+        <Button Content="Open job folder" Command="{Binding OpenFolderCommand}"
+                ToolTip.Tip="The agent's prompt, output and log, and the policy's plan.json" />
+      </StackPanel>
+
+      <StackPanel Spacing="2">
+        <TextBlock Classes="title" Text="{Binding Heading}" />
+        <TextBlock Text="{Binding StateText}" />
+        <TextBlock Classes="muted" Text="{Binding DeltaText}" />
+        <TextBlock Classes="muted" FontSize="12" Text="{Binding JobId}" />
+      </StackPanel>
+
+      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+      <TextBlock Classes="error" Text="{Binding Job.Error}" IsVisible="{Binding Job.Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+      <Border Classes="card" IsVisible="{Binding Job.Summary, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <StackPanel Spacing="4">
+          <TextBlock FontWeight="SemiBold" Text="Summary" />
+          <SelectableTextBlock TextWrapping="Wrap" Text="{Binding Job.Summary}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="4">
+          <TextBlock FontWeight="SemiBold" Text="Decision, and why" />
+          <ItemsControl ItemsSource="{Binding Reasons}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock TextWrapping="Wrap" Text="{Binding StringFormat='• {0}'}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <TextBlock FontWeight="SemiBold" Text="Findings" />
+      <ItemsControl ItemsSource="{Binding Findings}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:FindingItem">
+            <Border Classes="card">
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Classes="error" FontWeight="SemiBold" Text="blocking" IsVisible="{Binding Blocking}" />
+                    <TextBlock Classes="muted" Text="resolved" IsVisible="{Binding Resolved}" />
+                    <TextBlock Classes="muted" Text="{Binding Disposition}" />
+                  </StackPanel>
+                  <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding Title}" />
+                </DockPanel>
+                <TextBlock Classes="muted" FontSize="12" Text="{Binding Heading}" />
+                <SelectableTextBlock Classes="code" Text="{Binding Location}" />
+                <SelectableTextBlock TextWrapping="Wrap" Text="{Binding Body}" />
+                <Border Classes="code" IsVisible="{Binding Suggestion, Converter={x:Static ObjectConverters.IsNotNull}}">
+                  <SelectableTextBlock Classes="code" TextWrapping="Wrap" Text="{Binding Suggestion}" />
+                </Border>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

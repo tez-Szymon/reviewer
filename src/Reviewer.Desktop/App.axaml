@@ -1,0 +1,66 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             xmlns:v="using:Reviewer.Desktop.Views"
+             x:Class="Reviewer.Desktop.App"
+             RequestedThemeVariant="Default">
+  <!-- The app's own colours, light and dark; the Fluent theme has no card or status brushes of these kinds. -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="CardStrokeBrush" Color="#E0E0E0" />
+          <SolidColorBrush x:Key="CautionBrush" Color="#FFF4CE" />
+          <SolidColorBrush x:Key="ErrorBrush" Color="#C42B1C" />
+          <SolidColorBrush x:Key="CodeBrush" Color="#F3F3F3" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="CardBrush" Color="#2B2B2B" />
+          <SolidColorBrush x:Key="CardStrokeBrush" Color="#3D3D3D" />
+          <SolidColorBrush x:Key="CautionBrush" Color="#433519" />
+          <SolidColorBrush x:Key="ErrorBrush" Color="#FF99A4" />
+          <SolidColorBrush x:Key="CodeBrush" Color="#1F1F1F" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.DataTemplates>
+    <DataTemplate DataType="vm:QueueViewModel"><v:QueueView /></DataTemplate>
+    <DataTemplate DataType="vm:PullsViewModel"><v:PullsView /></DataTemplate>
+    <DataTemplate DataType="vm:HistoryViewModel"><v:HistoryView /></DataTemplate>
+    <DataTemplate DataType="vm:JobDetailViewModel"><v:JobDetailView /></DataTemplate>
+  </Application.DataTemplates>
+
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="TextBlock.title">
+      <Setter Property="FontSize" Value="22" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Opacity" Value="0.7" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="12" />
+    </Style>
+    <Style Selector="Border.code">
+      <Setter Property="Background" Value="{DynamicResource CodeBrush}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="8" />
+    </Style>
+    <Style Selector="SelectableTextBlock.code">
+      <Setter Property="FontFamily" Value="Menlo, Consolas, monospace" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+  </Application.Styles>
+</Application>

@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             x:Class="Reviewer.Desktop.Views.PullsView"
+             x:DataType="vm:PullsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
+      <DockPanel>
+        <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshCommand}" />
+        <TextBlock Classes="title" Text="Pull requests" />
+      </DockPanel>
+      <TextBlock Classes="muted" TextWrapping="Wrap"
+                 Text="Open PRs in the watched repos, as reviewer serve last polled them; drafts and others the trigger filters skip aren't listed." />
+      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    </StackPanel>
+    <ListBox x:Name="List" ItemsSource="{Binding Pulls}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:PullItem">
+          <Grid ColumnDefinitions="3*,2*,2*,Auto" ColumnSpacing="12">
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+              <TextBlock TextTrimming="CharacterEllipsis" Text="{Binding Title}" />
+              <TextBlock Classes="muted" FontSize="12" Text="{Binding Author}" />
+            </StackPanel>
+            <TextBlock Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap" Text="{Binding ReviewText}" />
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Classes="muted" TextWrapping="Wrap" Text="{Binding LatestJobText}" />
+            <Button Grid.Column="3" Content="Latest review" IsEnabled="{Binding HasJob}"
+                    Command="{Binding #List.((vm:PullsViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</UserControl>
