@@ -42,6 +42,9 @@ args=(
   # One channel per runtime, so an app only ever updates to a build for its own OS and architecture.
   --channel "$rid"
   --outputDir "$releases"
+  # Full packages only. Without this, an older package left in the output folder makes vpk build a delta, which
+  # needs zstd on macOS and isn't what the release ships anyway (each CI job starts with an empty folder).
+  --delta None
 )
 if [[ -n "${RELEASE_NOTES:-}" ]]; then
   args+=(--releaseNotes "$RELEASE_NOTES")
@@ -49,7 +52,8 @@ fi
 
 case "$rid" in
   osx-*)
-    args+=(--mainExe Reviewer.Desktop --bundleId com.github.tez-szymon.reviewer)
+    args+=(--mainExe Reviewer.Desktop --bundleId com.github.tez-szymon.reviewer
+      --icon "$root/src/Reviewer.Desktop/Assets/app.icns")
     if [[ -n "${MACOS_SIGN_APP_IDENTITY:-}" ]]; then
       args+=(
         --signAppIdentity "$MACOS_SIGN_APP_IDENTITY"
@@ -64,7 +68,8 @@ case "$rid" in
     fi
     ;;
   win-*)
-    args+=(--mainExe Reviewer.Desktop.exe --shortcuts StartMenuRoot)
+    args+=(--mainExe Reviewer.Desktop.exe --shortcuts StartMenuRoot
+      --icon "$root/src/Reviewer.Desktop/Assets/app.ico")
     if [[ -n "${WINDOWS_SIGN_TEMPLATE:-}" ]]; then
       args+=(--signTemplate "$WINDOWS_SIGN_TEMPLATE")
     else

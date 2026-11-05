@@ -6,6 +6,7 @@
         x:Class="Reviewer.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Reviewer"
+        Icon="avares://Reviewer.Desktop/Assets/app.png"
         Width="1180" Height="760" MinWidth="820" MinHeight="520">
   <Grid ColumnDefinitions="236,*">
 

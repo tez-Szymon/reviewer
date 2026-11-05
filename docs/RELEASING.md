@@ -20,7 +20,7 @@ The release has, per runtime:
 
 ## Signing
 
-Without these secrets the packages are built unsigned: macOS Gatekeeper refuses to open the app (right-click → Open gets past it), and Windows SmartScreen warns. Set them under the repository's Settings → Secrets and variables → Actions.
+Without these secrets the packages are built unsigned: macOS Gatekeeper refuses to open the installer and the app (since macOS 15, right-click → Open no longer gets past it; the user has to try once, then press Open Anyway in System Settings → Privacy & Security, or clear the quarantine with `xattr -dr com.apple.quarantine`), and Windows SmartScreen warns (More info → Run anyway). Set them under the repository's Settings → Secrets and variables → Actions.
 
 **macOS** needs an Apple Developer Program membership.
 
@@ -44,6 +44,8 @@ signtool sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /d
 That also needs the dlib, `metadata.json` and an Azure sign-in in the job before the Package step.
 
 ## Locally
+
+The app icon lives in `src/Reviewer.Desktop/Assets` as `app.icns` (macOS bundle), `app.ico` (Windows executable and installer) and `app.png` (window); `eng/icons/make-icons.sh` draws them again on macOS.
 
 `eng/package.sh <version> <rid>` builds the same packages into `artifacts/releases/<rid>`, signing when the variables it lists are set. It runs on macOS for `osx-*` and on Windows (Git Bash) for `win-*`.
 
