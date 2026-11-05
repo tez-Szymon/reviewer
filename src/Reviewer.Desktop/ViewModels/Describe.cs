@@ -19,6 +19,22 @@ internal static class Describe
         _ => Name(job.State),
     };
 
+    /// <summary>The colour of a job's state: green approved, amber changes requested or waiting on a limit, red failed.</summary>
+    public static Tone Tone(JobDto job) => job.State switch
+    {
+        JobState.Succeeded when job.Merge is MergeIntent.Merge or MergeIntent.MergeWhenGreen => ViewModels.Tone.Success,
+        JobState.Succeeded => job.Decision switch
+        {
+            ReviewDecision.Approve => ViewModels.Tone.Success,
+            ReviewDecision.RequestChanges => ViewModels.Tone.Warning,
+            _ => ViewModels.Tone.Accent,
+        },
+        JobState.Running => ViewModels.Tone.Accent,
+        JobState.Throttled => ViewModels.Tone.Warning,
+        JobState.Failed => ViewModels.Tone.Danger,
+        _ => ViewModels.Tone.Neutral,
+    };
+
     public static string Outcome(JobDto job)
     {
         var name = job.Decision switch

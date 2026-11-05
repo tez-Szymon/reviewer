@@ -1,39 +1,86 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             xmlns:c="using:Reviewer.Desktop.Controls"
              x:Class="Reviewer.Desktop.Views.QueueView"
              x:DataType="vm:QueueViewModel">
   <DockPanel>
-    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
-      <TextBlock Classes="title" Text="Queue" />
-      <TextBlock Classes="muted" Text="Reviews waiting, running, or throttled until the agent can take more, oldest first." />
-      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
-    </StackPanel>
-    <ListBox x:Name="List" ItemsSource="{Binding Jobs}">
-      <ListBox.ItemTemplate>
-        <DataTemplate x:DataType="vm:JobItem">
-          <Grid ColumnDefinitions="2*,2*,*,90,200" ColumnSpacing="12">
-            <StackPanel VerticalAlignment="Center">
-              <TextBlock FontWeight="SemiBold" Text="{Binding Pr}" />
-              <TextBlock Classes="muted" FontSize="12" Text="{Binding Id}" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-              <TextBlock TextWrapping="Wrap" Text="{Binding StateText}" />
-              <TextBlock Classes="error" FontSize="12" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
-            </StackPanel>
-            <TextBlock Grid.Column="2" VerticalAlignment="Center" Classes="muted" Text="{Binding Job.AgentId}" />
-            <TextBlock Grid.Column="3" VerticalAlignment="Center" Classes="muted" Text="{Binding When}" />
-            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
-              <Button Content="Retry" IsVisible="{Binding CanRetry}"
-                      Command="{Binding #List.((vm:QueueViewModel)DataContext).RetryCommand}" CommandParameter="{Binding}" />
-              <Button Content="Cancel" IsVisible="{Binding CanCancel}"
-                      Command="{Binding #List.((vm:QueueViewModel)DataContext).CancelCommand}" CommandParameter="{Binding}" />
-              <Button Content="Open"
-                      Command="{Binding #List.((vm:QueueViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}" />
-            </StackPanel>
-          </Grid>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
+    <Grid DockPanel.Dock="Top" Classes="pageHeader" ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="display" Text="Queue" />
+        <TextBlock Classes="subtitle" Text="Reviews waiting, running, or throttled until the agent can take more, oldest first." />
+      </StackPanel>
+    </Grid>
+
+    <Border DockPanel.Dock="Top" Classes="banner danger" Margin="0,0,0,16"
+            IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+        <c:Icon Data="{StaticResource Icon.CircleAlert}" />
+        <TextBlock Grid.Column="1" Text="{Binding Error}" />
+      </Grid>
+    </Border>
+
+    <Border Classes="card flush" VerticalAlignment="Top">
+      <Panel>
+        <ProgressBar Classes="loading" VerticalAlignment="Top" IsVisible="{Binding Loading}" />
+
+        <StackPanel Classes="empty">
+          <StackPanel.IsVisible>
+            <MultiBinding Converter="{x:Static BoolConverters.And}">
+              <Binding Path="!Jobs.Count" />
+              <Binding Path="!Loading" />
+            </MultiBinding>
+          </StackPanel.IsVisible>
+          <Border Classes="emptyIcon"><c:Icon Data="{StaticResource Icon.Inbox}" /></Border>
+          <TextBlock Classes="strong" Text="The queue is empty" />
+          <TextBlock Classes="caption" Text="New commits on watched pull requests are queued here for review." />
+        </StackPanel>
+
+        <ListBox x:Name="List" Classes="rows" ItemsSource="{Binding Jobs}" IsVisible="{Binding Jobs.Count}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:JobItem">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="16">
+                <StackPanel Spacing="3" VerticalAlignment="Center">
+                  <TextBlock Classes="strong" TextTrimming="CharacterEllipsis" Text="{Binding Pr}" />
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Classes="caption" Text="{Binding Job.AgentId}" />
+                    <TextBlock Classes="caption" Text="·" />
+                    <TextBlock Classes="caption" Text="{Binding When}" />
+                    <TextBlock Classes="caption" Text="·" />
+                    <TextBlock Classes="caption mono" Text="{Binding Id}" />
+                  </StackPanel>
+                  <TextBlock Classes="error caption" Margin="0,2,0,0" Text="{Binding Error}"
+                             IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+                <c:Badge Grid.Column="1" ShowDot="True" Text="{Binding StateText}" Tone="{Binding Tone}" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                  <Button Classes="ghost" IsVisible="{Binding CanRetry}" ToolTip.Tip="Retry"
+                          Command="{Binding #List.((vm:QueueViewModel)DataContext).RetryCommand}" CommandParameter="{Binding}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <c:Icon Data="{StaticResource Icon.RotateCcw}" />
+                      <TextBlock Text="Retry" />
+                    </StackPanel>
+                  </Button>
+                  <Button Classes="ghost danger" IsVisible="{Binding CanCancel}" ToolTip.Tip="Cancel this review"
+                          Command="{Binding #List.((vm:QueueViewModel)DataContext).CancelCommand}" CommandParameter="{Binding}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <c:Icon Data="{StaticResource Icon.X}" />
+                      <TextBlock Text="Cancel" />
+                    </StackPanel>
+                  </Button>
+                  <Button Classes="ghost" ToolTip.Tip="Open the review"
+                          Command="{Binding #List.((vm:QueueViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="Open" />
+                      <c:Icon Data="{StaticResource Icon.ChevronRight}" />
+                    </StackPanel>
+                  </Button>
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Panel>
+    </Border>
   </DockPanel>
 </UserControl>

@@ -91,6 +91,24 @@ public sealed class TrayTests : IDisposable
     }
 
     [Fact]
+    public async Task EngineHeadline_SaysWhetherTheEngineRuns()
+    {
+        _engine.Status = null;
+        using var window = Window(new FakeLauncher(_engine));
+        var changes = new List<string?>();
+        window.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
+        Assert.Equal("Connecting…", window.EngineHeadline);
+
+        await window.Engine.ConnectAsync(start: false, CancellationToken.None);
+        Assert.Equal("Engine stopped", window.EngineHeadline);
+
+        _engine.Status = FakeEngine.Running;
+        await window.Engine.ConnectAsync(start: false, CancellationToken.None);
+        Assert.Equal("Engine running", window.EngineHeadline);
+        Assert.Contains(nameof(MainWindowViewModel.EngineHeadline), changes);
+    }
+
+    [Fact]
     public async Task TrayText_SaysWhatTheQueueHolds_OrWhyThereIsNoEngine()
     {
         _engine.Status = null;

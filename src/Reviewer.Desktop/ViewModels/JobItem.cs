@@ -8,7 +8,7 @@ namespace Reviewer.Desktop.ViewModels;
 internal sealed partial class JobItem(JobDto job) : ObservableObject
 {
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Pr), nameof(StateText), nameof(When), nameof(Error), nameof(CanCancel), nameof(CanRetry))]
+    [NotifyPropertyChangedFor(nameof(Pr), nameof(StateText), nameof(Tone), nameof(When), nameof(Error), nameof(CanCancel), nameof(CanRetry))]
     private JobDto _job = job;
 
     /// <summary>Finding counts from the list the item was loaded with; events don't carry them.</summary>
@@ -19,6 +19,8 @@ internal sealed partial class JobItem(JobDto job) : ObservableObject
     public string Pr => Describe.Pr(Job.Repo, Job.Number);
 
     public string StateText => Describe.State(Job);
+
+    public Tone Tone => Describe.Tone(Job);
 
     public string When => Describe.Time(Job.StartedAt ?? Job.CreatedAt);
 

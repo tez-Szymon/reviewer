@@ -3,26 +3,15 @@
              xmlns:vm="using:Reviewer.Desktop.ViewModels"
              xmlns:v="using:Reviewer.Desktop.Views"
              x:Class="Reviewer.Desktop.App"
+             Name="Reviewer"
              RequestedThemeVariant="Default">
-  <!-- The app's own colours, light and dark; the Fluent theme has no card or status brushes of these kinds. -->
+  <!-- RequestedThemeVariant Default: light or dark as the OS is, switching when it does. -->
   <Application.Resources>
     <ResourceDictionary>
-      <ResourceDictionary.ThemeDictionaries>
-        <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
-          <SolidColorBrush x:Key="CardStrokeBrush" Color="#E0E0E0" />
-          <SolidColorBrush x:Key="CautionBrush" Color="#FFF4CE" />
-          <SolidColorBrush x:Key="ErrorBrush" Color="#C42B1C" />
-          <SolidColorBrush x:Key="CodeBrush" Color="#F3F3F3" />
-        </ResourceDictionary>
-        <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="CardBrush" Color="#2B2B2B" />
-          <SolidColorBrush x:Key="CardStrokeBrush" Color="#3D3D3D" />
-          <SolidColorBrush x:Key="CautionBrush" Color="#433519" />
-          <SolidColorBrush x:Key="ErrorBrush" Color="#FF99A4" />
-          <SolidColorBrush x:Key="CodeBrush" Color="#1F1F1F" />
-        </ResourceDictionary>
-      </ResourceDictionary.ThemeDictionaries>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://Reviewer.Desktop/Themes/Tokens.axaml" />
+        <ResourceInclude Source="avares://Reviewer.Desktop/Themes/Icons.axaml" />
+      </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>
 
@@ -38,56 +27,41 @@
     <DataTemplate DataType="vm:SettingSection">
       <Border Classes="card">
         <StackPanel Spacing="4">
-          <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
-          <ItemsControl ItemsSource="{Binding Fields}" />
+          <TextBlock Classes="title" Margin="0,0,0,8" Text="{Binding Title}" />
+          <ItemsControl ItemsSource="{Binding Fields}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Spacing="14" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
         </StackPanel>
       </Border>
     </DataTemplate>
     <DataTemplate DataType="vm:SettingField">
-      <Grid ColumnDefinitions="230,*" ColumnSpacing="12" Margin="0,4">
-        <CheckBox VerticalAlignment="Top" Content="{Binding Label}" IsChecked="{Binding IsSet}"
-                  ToolTip.Tip="Ticked: set at this level. Unticked: inherits." />
-        <StackPanel Grid.Column="1" Spacing="2">
-          <ComboBox MinWidth="220" IsVisible="{Binding IsChoice}" IsEnabled="{Binding IsSet}"
+      <Grid ColumnDefinitions="260,*" ColumnSpacing="20">
+        <StackPanel Spacing="2">
+          <CheckBox VerticalAlignment="Top" FontWeight="Medium" Content="{Binding Label}" IsChecked="{Binding IsSet}"
+                    ToolTip.Tip="Ticked: set at this level. Unticked: inherits." />
+          <TextBlock Classes="caption" Margin="28,0,0,0" TextWrapping="Wrap" Text="{Binding Hint}"
+                     IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Top">
+          <ComboBox MinWidth="240" IsVisible="{Binding IsChoice}" IsEnabled="{Binding IsSet}"
                     ItemsSource="{Binding Options}" SelectedItem="{Binding Value}" />
           <TextBox IsVisible="{Binding IsText}" IsEnabled="{Binding IsSet}" Text="{Binding Value}"
                    AcceptsReturn="{Binding IsLines}" TextWrapping="NoWrap" />
-          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding InheritedText}" />
-          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding Hint}"
-                     IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding InheritedText}" />
         </StackPanel>
       </Grid>
     </DataTemplate>
   </Application.DataTemplates>
 
   <Application.Styles>
-    <FluentTheme />
-    <Style Selector="TextBlock.title">
-      <Setter Property="FontSize" Value="22" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
-    <Style Selector="TextBlock.muted">
-      <Setter Property="Opacity" Value="0.7" />
-    </Style>
-    <Style Selector="TextBlock.error">
-      <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
-      <Setter Property="TextWrapping" Value="Wrap" />
-    </Style>
-    <Style Selector="Border.card">
-      <Setter Property="Background" Value="{DynamicResource CardBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeBrush}" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="6" />
-      <Setter Property="Padding" Value="12" />
-    </Style>
-    <Style Selector="Border.code">
-      <Setter Property="Background" Value="{DynamicResource CodeBrush}" />
-      <Setter Property="CornerRadius" Value="4" />
-      <Setter Property="Padding" Value="8" />
-    </Style>
-    <Style Selector="SelectableTextBlock.code">
-      <Setter Property="FontFamily" Value="Menlo, Consolas, monospace" />
-      <Setter Property="FontSize" Value="12" />
-    </Style>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#FF4F46E5" RegionColor="#FFFAFAFA" />
+        <ColorPaletteResources x:Key="Dark" Accent="#FF6366F1" RegionColor="#FF0F0F11" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="avares://Reviewer.Desktop/Themes/Controls.axaml" />
   </Application.Styles>
 </Application>

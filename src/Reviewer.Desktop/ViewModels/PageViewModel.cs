@@ -8,6 +8,9 @@ internal abstract partial class PageViewModel : ObservableObject
 {
     public abstract string Title { get; }
 
+    /// <summary>A count the sidebar shows beside the title, such as the jobs in the queue; null for none.</summary>
+    public virtual string? Badge => null;
+
     /// <summary>What went wrong with the last load or action, until the next one succeeds.</summary>
     [ObservableProperty]
     private string? _error;

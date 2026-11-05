@@ -81,6 +81,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
             if (e.PropertyName == nameof(EngineConnection.Description))
             {
                 OnPropertyChanged(nameof(TrayText));
+                OnPropertyChanged(nameof(EngineHeadline));
             }
         };
         _selectedPage = _current = Pages[0];
@@ -119,6 +120,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     /// build folder.
     /// </summary>
     public bool CanStartAtLogin => _loginItem is not null && _updater.IsInstalled;
+
+    /// <summary>The engine's state in two or three words, as the sidebar shows it above what the queue holds.</summary>
+    public string EngineHeadline => Engine.State switch
+    {
+        EngineState.Connected => "Engine running",
+        EngineState.Starting => "Starting the engine…",
+        EngineState.Connecting => "Connecting…",
+        _ => "Engine stopped",
+    };
 
     /// <summary>The tray icon's tooltip: what the engine is doing, or why there's none.</summary>
     public string TrayText => Engine.IsConnected ? $"Reviewer: {Queue.Activity}" : $"Reviewer: {Engine.Description}";

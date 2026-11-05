@@ -1,72 +1,183 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             xmlns:c="using:Reviewer.Desktop.Controls"
              x:Class="Reviewer.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
   <DockPanel>
-    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
-      <DockPanel>
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" IsEnabled="{Binding CanEdit}">
-          <Button Content="Revert" Command="{Binding RevertCommand}" />
-          <Button Classes="accent" Content="Save" Command="{Binding SaveCommand}" />
-        </StackPanel>
-        <TextBlock Classes="title" Text="Settings" />
-      </DockPanel>
-      <TextBlock Classes="muted" TextWrapping="Wrap"
-                 Text="Saving edits only the keys you changed in config.yaml. Untick a setting to go back to the built-in value; repos override these in Repos." />
-      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    <Grid DockPanel.Dock="Top" Classes="pageHeader" ColumnDefinitions="*,Auto" ColumnSpacing="24">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="display" Text="Settings" />
+        <TextBlock Classes="subtitle"
+                   Text="Saving edits only the keys you changed in config.yaml. Untick a setting to go back to the built-in value; repos override these in Repos." />
+      </StackPanel>
+      <StackPanel Grid.Column="1" Classes="toolbar" IsEnabled="{Binding CanEdit}">
+        <Button Command="{Binding RevertCommand}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <c:Icon Data="{StaticResource Icon.Undo2}" />
+            <TextBlock Text="Revert" />
+          </StackPanel>
+        </Button>
+        <Button Classes="accent" Command="{Binding SaveCommand}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <c:Icon Data="{StaticResource Icon.Save}" />
+            <TextBlock Text="Save" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </Grid>
+
+    <StackPanel DockPanel.Dock="Top">
+      <Border Classes="banner danger" Margin="0,0,0,12" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+          <c:Icon Data="{StaticResource Icon.CircleAlert}" />
+          <TextBlock Grid.Column="1" Text="{Binding Error}" />
+        </Grid>
+      </Border>
       <ItemsControl ItemsSource="{Binding Problems}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="x:String"><TextBlock Classes="error" Text="{Binding}" /></DataTemplate>
+          <DataTemplate x:DataType="x:String">
+            <Border Classes="banner warning" Margin="0,0,0,12">
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                <c:Icon Data="{StaticResource Icon.TriangleAlert}" />
+                <TextBlock Grid.Column="1" Text="{Binding}" />
+              </Grid>
+            </Border>
+          </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
     </StackPanel>
 
     <ScrollViewer>
-      <StackPanel x:Name="Page" Spacing="12" MaxWidth="980" HorizontalAlignment="Left" Margin="0,0,12,0">
+      <StackPanel x:Name="Page" Spacing="16" MaxWidth="960" HorizontalAlignment="Left" Margin="0,0,12,16">
+
+        <!-- This app's own preferences: they apply at once and live in desktop.json, not config.yaml. -->
         <Border Classes="card">
-          <StackPanel Spacing="8">
-            <TextBlock FontWeight="SemiBold" Text="Accounts" />
-            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding ImplicitAccount}"
-                       Text="No accounts in config.yaml, so github.com is used with GITHUB_TOKEN, GH_TOKEN or gh auth login. Adding an account replaces it." />
-            <ItemsControl ItemsSource="{Binding Accounts}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:AccountItem">
-                  <DockPanel Margin="0,4">
-                    <Button DockPanel.Dock="Right" Content="Remove" IsVisible="{Binding CanRemove}"
-                            Command="{Binding #Page.((vm:SettingsViewModel)DataContext).RemoveAccountCommand}" CommandParameter="{Binding}" />
-                    <StackPanel>
-                      <TextBlock FontWeight="SemiBold" Text="{Binding Id}" />
-                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding Details}" />
-                      <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding Status}" />
-                    </StackPanel>
-                  </DockPanel>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <WrapPanel IsEnabled="{Binding CanEdit}">
-              <TextBox Width="140" Margin="0,0,8,8" PlaceholderText="Id, e.g. gh-main" Text="{Binding NewAccountId}" />
-              <ComboBox Width="110" Margin="0,0,8,8" ItemsSource="{x:Static vm:SettingsViewModel.Providers}" SelectedItem="{Binding NewProvider}" />
-              <TextBox Width="240" Margin="0,0,8,8" PlaceholderText="Host (optional), e.g. https://gitlab.example.com" Text="{Binding NewHost}" />
-              <TextBox Width="240" Margin="0,0,8,8" PlaceholderText="Token reference, e.g. keychain:reviewer/gh-main" Text="{Binding NewToken}"
-                       ToolTip.Tip="env:NAME or keychain:SERVICE/ACCOUNT. Never the token itself: add it with the OS's own tool." />
-              <Button Margin="0,0,8,8" Content="Add account" Command="{Binding AddAccountCommand}" />
-            </WrapPanel>
+          <StackPanel Spacing="14">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="title" Text="App" />
+              <TextBlock Classes="caption" TextWrapping="Wrap" Text="Preferences for this app; they apply at once, without Save." />
+            </StackPanel>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="strong" Text="Keep the engine running after quitting" />
+                <TextBlock Classes="caption" TextWrapping="Wrap"
+                           Text="Reviews go on without the app; it finds the engine again when it starts. An engine started elsewhere always keeps running." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" VerticalAlignment="Center"
+                            IsChecked="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).KeepEngineRunning}" />
+            </Grid>
+            <Separator IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CanStartAtLogin}" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20"
+                  IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CanStartAtLogin}">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="strong" Text="Start at login" />
+                <TextBlock Classes="caption" TextWrapping="Wrap"
+                           Text="Starts the app in the tray when you log in, with the window hidden, so reviews start with your computer." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" VerticalAlignment="Center"
+                            IsChecked="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).StartAtLogin}" />
+            </Grid>
           </StackPanel>
         </Border>
 
+        <!-- Accounts. -->
         <Border Classes="card">
-          <StackPanel Spacing="8">
-            <DockPanel>
-              <Button DockPanel.Dock="Right" Content="Check again" Command="{Binding CheckAgentsCommand}" />
-              <TextBlock FontWeight="SemiBold" VerticalAlignment="Center" Text="Agent health" />
-            </DockPanel>
+          <StackPanel Spacing="12">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="title" Text="Accounts" />
+              <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding ImplicitAccount}"
+                         Text="No accounts in config.yaml, so github.com is used with GITHUB_TOKEN, GH_TOKEN or gh auth login. Adding an account replaces it." />
+            </StackPanel>
+            <Border Classes="card flush" BoxShadow="none" IsVisible="{Binding Accounts.Count}">
+              <ItemsControl ItemsSource="{Binding Accounts}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:AccountItem">
+                    <Border Padding="16,12" BorderBrush="{DynamicResource Stroke.Subtle}" BorderThickness="0,0,0,1">
+                      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                        <Ellipse Classes="dot" Classes.success="{Binding SignedIn}" VerticalAlignment="Top" Margin="0,5,0,0" />
+                        <StackPanel Grid.Column="1" Spacing="2">
+                          <TextBlock Classes="strong" Text="{Binding Id}" />
+                          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Details}" />
+                          <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Text.Secondary}" Text="{Binding Status}" />
+                        </StackPanel>
+                        <Button Grid.Column="2" Classes="ghost danger" VerticalAlignment="Center" IsVisible="{Binding CanRemove}"
+                                IsEnabled="{Binding #Page.((vm:SettingsViewModel)DataContext).CanEdit}"
+                                Command="{Binding #Page.((vm:SettingsViewModel)DataContext).RemoveAccountCommand}" CommandParameter="{Binding}">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:Icon Data="{StaticResource Icon.Trash2}" />
+                            <TextBlock Text="Remove" />
+                          </StackPanel>
+                        </Button>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+
+            <Border Background="{DynamicResource Surface.Sunken}" CornerRadius="{StaticResource Radius.Medium}" Padding="16"
+                    IsEnabled="{Binding CanEdit}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="overline" Text="ADD AN ACCOUNT" />
+                <Grid ColumnDefinitions="140,120,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+                  <TextBox PlaceholderText="Id, e.g. gh-main" Text="{Binding NewAccountId}" />
+                  <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{x:Static vm:SettingsViewModel.Providers}"
+                            SelectedItem="{Binding NewProvider}" />
+                  <TextBox Grid.Column="2" PlaceholderText="Host (optional), e.g. https://gitlab.example.com" Text="{Binding NewHost}" />
+                  <TextBox Grid.Row="1" Grid.ColumnSpan="3" Margin="0,0,112,0"
+                           PlaceholderText="Token reference, e.g. keychain:reviewer/gh-main" Text="{Binding NewToken}"
+                           ToolTip.Tip="env:NAME or keychain:SERVICE/ACCOUNT. Never the token itself: add it with the OS's own tool.">
+                    <TextBox.InnerLeftContent>
+                      <c:Icon Data="{StaticResource Icon.KeyRound}" Margin="10,0,0,0" Foreground="{DynamicResource Text.Tertiary}" />
+                    </TextBox.InnerLeftContent>
+                  </TextBox>
+                  <Button Grid.Row="1" Grid.Column="2" HorizontalAlignment="Right" Width="104" HorizontalContentAlignment="Center"
+                          Command="{Binding AddAccountCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <c:Icon Data="{StaticResource Icon.Plus}" />
+                      <TextBlock Text="Add" />
+                    </StackPanel>
+                  </Button>
+                </Grid>
+                <TextBlock Classes="caption" TextWrapping="Wrap"
+                           Text="The token is referenced, never stored: env:NAME or keychain:SERVICE/ACCOUNT. Add the token itself with the OS's own tool." />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Border>
+
+        <!-- Agents and whether each can run now. -->
+        <Border Classes="card">
+          <StackPanel Spacing="12">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="title" VerticalAlignment="Center" Text="Agent health" />
+              <Button Grid.Column="1" Command="{Binding CheckAgentsCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <c:Icon Data="{StaticResource Icon.RefreshCw}" />
+                  <TextBlock Text="Check again" />
+                </StackPanel>
+              </Button>
+            </Grid>
+            <TextBlock Classes="caption" Text="No agents reported yet." IsVisible="{Binding !Agents.Count}" />
             <ItemsControl ItemsSource="{Binding Agents}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Spacing="10" /></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:AgentItem">
-                  <Grid ColumnDefinitions="140,*" Margin="0,2">
-                    <TextBlock FontWeight="SemiBold" Text="{Binding Id}" />
-                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Status}" />
+                  <Grid ColumnDefinitions="Auto,Auto,180,*" ColumnSpacing="12">
+                    <Ellipse Classes="dot" Classes.success="{Binding Ready}" Classes.danger="{Binding !Ready}" />
+                    <c:Icon Grid.Column="1" Data="{StaticResource Icon.Bot}" Foreground="{DynamicResource Text.Tertiary}" />
+                    <TextBlock Grid.Column="2" Classes="strong" VerticalAlignment="Center" Text="{Binding Id}" />
+                    <TextBlock Grid.Column="3" VerticalAlignment="Center" TextWrapping="Wrap"
+                               Foreground="{DynamicResource Text.Secondary}" Text="{Binding Status}" />
                   </Grid>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
@@ -76,14 +187,17 @@
 
         <ItemsControl ItemsSource="{Binding AgentSettings}" IsEnabled="{Binding CanEdit}">
           <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><StackPanel Spacing="12" /></ItemsPanelTemplate>
+            <ItemsPanelTemplate><StackPanel Spacing="16" /></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
         </ItemsControl>
 
-        <TextBlock Classes="title" FontSize="18" Text="Global policy" />
+        <StackPanel Spacing="2" Margin="0,16,0,0">
+          <TextBlock Classes="title" FontSize="20" Text="Global policy" />
+          <TextBlock Classes="caption" Text="What every repo does unless it overrides it in Repos." />
+        </StackPanel>
         <ItemsControl ItemsSource="{Binding Policy}" IsEnabled="{Binding CanEdit}">
           <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><StackPanel Spacing="12" /></ItemsPanelTemplate>
+            <ItemsPanelTemplate><StackPanel Spacing="16" /></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
         </ItemsControl>
       </StackPanel>

@@ -1,78 +1,164 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             xmlns:c="using:Reviewer.Desktop.Controls"
              x:Class="Reviewer.Desktop.Views.ReposView"
              x:DataType="vm:ReposViewModel">
   <DockPanel>
-    <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
-      <TextBlock Classes="title" Text="Repos" />
-      <TextBlock Classes="muted" TextWrapping="Wrap"
-                 Text="The repos reviewer serve polls, each under repos in config.yaml. Changes edit only those keys; the file's comments and layout stay." />
-      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    <Grid DockPanel.Dock="Top" Classes="pageHeader" ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="display" Text="Repos" />
+        <TextBlock Classes="subtitle"
+                   Text="The repos reviewer serve polls, each under repos in config.yaml. Changes edit only those keys; the file's comments and layout stay." />
+      </StackPanel>
+    </Grid>
+
+    <StackPanel DockPanel.Dock="Top">
+      <Border Classes="banner danger" Margin="0,0,0,12" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+          <c:Icon Data="{StaticResource Icon.CircleAlert}" />
+          <TextBlock Grid.Column="1" Text="{Binding Error}" />
+        </Grid>
+      </Border>
       <ItemsControl ItemsSource="{Binding Problems}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="x:String"><TextBlock Classes="error" Text="{Binding}" /></DataTemplate>
+          <DataTemplate x:DataType="x:String">
+            <Border Classes="banner warning" Margin="0,0,0,12">
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                <c:Icon Data="{StaticResource Icon.TriangleAlert}" />
+                <TextBlock Grid.Column="1" Text="{Binding}" />
+              </Grid>
+            </Border>
+          </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
-      <DockPanel IsEnabled="{Binding CanEdit}">
-        <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Watch" Command="{Binding AddCommand}" />
-        <TextBox PlaceholderText="Paste a repo's URL, such as https://github.com/acme/api" Text="{Binding AddUrl}" />
-      </DockPanel>
-      <Expander Header="Browse an account's repos" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEdit}">
-        <StackPanel Spacing="8">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <ComboBox Width="180" ItemsSource="{Binding Accounts}" SelectedItem="{Binding BrowseAccount}" />
-            <TextBox Width="260" PlaceholderText="Owner, organization or group (optional)" Text="{Binding BrowseOwner}" />
-            <Button Content="List repos" Command="{Binding BrowseCommand}" />
-            <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding Browsing}" />
+    </StackPanel>
+
+    <!-- Adding: paste a URL, or browse what an account can see. -->
+    <Border DockPanel.Dock="Top" Classes="card" Padding="16" Margin="0,0,0,16" IsEnabled="{Binding CanEdit}">
+      <StackPanel Spacing="10">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBox PlaceholderText="Paste a repo's URL, such as https://github.com/acme/api" Text="{Binding AddUrl}">
+            <TextBox.InnerLeftContent>
+              <c:Icon Data="{StaticResource Icon.Plus}" Margin="10,0,0,0" Foreground="{DynamicResource Text.Tertiary}" />
+            </TextBox.InnerLeftContent>
+          </TextBox>
+          <Button Grid.Column="1" Classes="accent" Command="{Binding AddCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <c:Icon Data="{StaticResource Icon.Plus}" />
+              <TextBlock Text="Watch" />
+            </StackPanel>
+          </Button>
+        </Grid>
+        <Expander Header="Browse an account's repos" HorizontalAlignment="Stretch">
+          <StackPanel Spacing="10">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+              <ComboBox MinWidth="160" ItemsSource="{Binding Accounts}" SelectedItem="{Binding BrowseAccount}" />
+              <TextBox Grid.Column="1" PlaceholderText="Owner, organization or group (optional)" Text="{Binding BrowseOwner}" />
+              <Button Grid.Column="2" Command="{Binding BrowseCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <c:Icon Data="{StaticResource Icon.Search}" />
+                  <TextBlock Text="List repos" />
+                </StackPanel>
+              </Button>
+            </Grid>
+            <ProgressBar Classes="loading" IsVisible="{Binding Browsing}" />
+            <Border Classes="card flush" IsVisible="{Binding Choices.Count}">
+              <ListBox x:Name="Choices" Classes="rows" MaxHeight="240" ItemsSource="{Binding Choices}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:RepoChoiceItem">
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="ghost" IsVisible="{Binding !Watched}"
+                              Command="{Binding #Choices.((vm:ReposViewModel)DataContext).WatchChoiceCommand}" CommandParameter="{Binding}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <c:Icon Data="{StaticResource Icon.Plus}" />
+                          <TextBlock Text="Watch" />
+                        </StackPanel>
+                      </Button>
+                      <c:Badge DockPanel.Dock="Right" Text="watched" Tone="Success" IsVisible="{Binding Watched}" />
+                      <TextBlock VerticalAlignment="Center" Text="{Binding Repo}" />
+                    </DockPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Border>
           </StackPanel>
-          <ListBox x:Name="Choices" MaxHeight="240" ItemsSource="{Binding Choices}">
+        </Expander>
+      </StackPanel>
+    </Border>
+
+    <!-- The watched repos, and what the chosen one does differently from the defaults. -->
+    <Grid ColumnDefinitions="300,*" ColumnSpacing="20">
+      <Border Classes="card flush" VerticalAlignment="Top">
+        <Panel>
+          <StackPanel Classes="empty" Margin="16,40" IsVisible="{Binding !Watched.Count}">
+            <Border Classes="emptyIcon"><c:Icon Data="{StaticResource Icon.FolderGit2}" /></Border>
+            <TextBlock Classes="strong" Text="No repos watched yet" />
+            <TextBlock Classes="caption" Text="Paste a repo's URL above, or browse an account's repos." />
+          </StackPanel>
+          <ListBox x:Name="Watched" Classes="rows pick" ItemsSource="{Binding Watched}" SelectedItem="{Binding Selected}"
+                   IsVisible="{Binding Watched.Count}">
             <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:RepoChoiceItem">
-                <DockPanel>
-                  <Button DockPanel.Dock="Right" Content="Watch" IsVisible="{Binding !Watched}"
-                          Command="{Binding #Choices.((vm:ReposViewModel)DataContext).WatchChoiceCommand}" CommandParameter="{Binding}" />
-                  <TextBlock DockPanel.Dock="Right" Classes="muted" VerticalAlignment="Center" Text="watched" IsVisible="{Binding Watched}" />
-                  <TextBlock VerticalAlignment="Center" Text="{Binding Repo}" />
-                </DockPanel>
+              <DataTemplate x:DataType="vm:WatchedRepoItem">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                  <c:Icon Data="{StaticResource Icon.FolderGit2}" VerticalAlignment="Top" Margin="0,1,0,0"
+                          Foreground="{DynamicResource Text.Tertiary}" />
+                  <StackPanel Grid.Column="1" Spacing="2">
+                    <TextBlock Classes="strong" TextTrimming="CharacterEllipsis" Text="{Binding Repo}" />
+                    <TextBlock Classes="caption" TextTrimming="CharacterEllipsis" Text="{Binding Details}" />
+                  </StackPanel>
+                </Grid>
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
+        </Panel>
+      </Border>
+
+      <Border Grid.Column="1" Classes="card" VerticalAlignment="Top" IsVisible="{Binding !HasSelection}">
+        <StackPanel Classes="empty" Margin="16,32">
+          <Border Classes="emptyIcon"><c:Icon Data="{StaticResource Icon.Settings}" /></Border>
+          <TextBlock Classes="strong" Text="Pick a repo" />
+          <TextBlock Classes="caption" Text="Choose a repo on the left to set what it does differently from the defaults in Settings." />
         </StackPanel>
-      </Expander>
-    </StackPanel>
-
-    <Grid ColumnDefinitions="300,*" ColumnSpacing="16">
-      <ListBox x:Name="Watched" ItemsSource="{Binding Watched}" SelectedItem="{Binding Selected}">
-        <ListBox.ItemTemplate>
-          <DataTemplate x:DataType="vm:WatchedRepoItem">
-            <StackPanel>
-              <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding Repo}" />
-              <TextBlock Classes="muted" FontSize="12" Text="{Binding Details}" />
-            </StackPanel>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
-
-      <TextBlock Grid.Column="1" Classes="muted" TextWrapping="Wrap" IsVisible="{Binding !HasSelection}"
-                 Text="Pick a repo to set what it does differently from the defaults in Settings." />
+      </Border>
       <DockPanel Grid.Column="1" IsVisible="{Binding HasSelection}">
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-            <Button Content="Revert" Command="{Binding RevertCommand}" />
-            <Button Classes="accent" Content="Save" Command="{Binding SaveCommand}" />
-            <Button Content="Stop watching" Command="{Binding RemoveCommand}" CommandParameter="{Binding Selected}" />
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,0,0,12">
+          <TextBlock Classes="title" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="{Binding Selected.Repo}" />
+          <StackPanel Grid.Column="1" Classes="toolbar">
+            <Button Classes="ghost danger" Command="{Binding RemoveCommand}" CommandParameter="{Binding Selected}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <c:Icon Data="{StaticResource Icon.Trash2}" />
+                <TextBlock Text="Stop watching" />
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding RevertCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <c:Icon Data="{StaticResource Icon.Undo2}" />
+                <TextBlock Text="Revert" />
+              </StackPanel>
+            </Button>
+            <Button Classes="accent" Command="{Binding SaveCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <c:Icon Data="{StaticResource Icon.Save}" />
+                <TextBlock Text="Save" />
+              </StackPanel>
+            </Button>
           </StackPanel>
-          <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding Selected.Repo}" />
-        </DockPanel>
+        </Grid>
         <ScrollViewer>
-          <StackPanel Spacing="12" Margin="0,0,12,0">
+          <StackPanel Spacing="16" Margin="0,0,12,16">
             <Border Classes="card">
-              <ContentControl Content="{Binding Agent}" />
+              <StackPanel Spacing="12">
+                <TextBlock Classes="title" Text="Agent" />
+                <ContentControl Content="{Binding Agent}" />
+              </StackPanel>
             </Border>
             <ItemsControl ItemsSource="{Binding Overrides}">
               <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate><StackPanel Spacing="12" /></ItemsPanelTemplate>
+                <ItemsPanelTemplate><StackPanel Spacing="16" /></ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
             </ItemsControl>
           </StackPanel>

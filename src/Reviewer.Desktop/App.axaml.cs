@@ -133,6 +133,9 @@ internal sealed partial class App : Application
         var update = new NativeMenuItem("Restart to update") { IsVisible = model.Updates.IsReady };
         update.Click += (_, _) => model.RestartToUpdateCommand.Execute(null);
 
+        // What the engine is doing, at the top of the menu; not clickable.
+        var status = new NativeMenuItem(model.TrayText) { IsEnabled = false };
+
         var open = new NativeMenuItem("Open Reviewer");
         open.Click += (_, _) => Show();
         var quit = new NativeMenuItem("Quit Reviewer");
@@ -143,7 +146,7 @@ internal sealed partial class App : Application
             Icon = new WindowIcon(AssetLoader.Open(new Uri(
                 OperatingSystem.IsMacOS() ? "avares://Reviewer.Desktop/Assets/tray-template.png" : "avares://Reviewer.Desktop/Assets/tray.png"))),
             ToolTipText = model.TrayText,
-            Menu = [open, update, new NativeMenuItemSeparator(), keepRunning, startAtLogin, new NativeMenuItemSeparator(), quit],
+            Menu = [status, new NativeMenuItemSeparator(), open, update, new NativeMenuItemSeparator(), keepRunning, startAtLogin, new NativeMenuItemSeparator(), quit],
         };
 
         // The menu bar tints a template icon for light and dark, as it does its own.
@@ -155,6 +158,7 @@ internal sealed partial class App : Application
             {
                 case nameof(MainWindowViewModel.TrayText):
                     tray.ToolTipText = model.TrayText;
+                    status.Header = model.TrayText;
                     break;
                 case nameof(MainWindowViewModel.KeepEngineRunning):
                     keepRunning.IsChecked = model.KeepEngineRunning;
