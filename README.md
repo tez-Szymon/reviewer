@@ -116,7 +116,9 @@ codex login                # Codex 0.162 or later
 export ANTHROPIC_API_KEY=… # Anthropic API (agents.default: anthropic-api)
 ```
 
-**2. Give it a token.** GitHub: `GITHUB_TOKEN`, or just `gh auth login`. GitLab: a token with the `api` scope in `GITLAB_TOKEN`, plus an account in `config.yaml`. To keep tokens in the OS keychain instead, add the item with the platform's own tool and reference it as `token: keychain:reviewer/gh-main`:
+**2. Give it a token.** In the desktop app, paste a repo's URL on the **Repos** page: if no account covers its host yet (any GitLab, say), the page asks for a token, saves it in the OS keychain, checks it signs in, and watches the repo. GitLab tokens need the `api` scope, GitHub's the `repo` scope.
+
+From the command line: GitHub reads `GITHUB_TOKEN`, or just `gh auth login`. GitLab reads a token with the `api` scope from `GITLAB_TOKEN`, plus an account in `config.yaml`. To keep tokens in the OS keychain instead, add the item with the platform's own tool and reference it as `token: keychain:reviewer/gh-main`:
 
 ```bash
 security add-generic-password -s reviewer -a gh-main -U -w                     # macOS Keychain

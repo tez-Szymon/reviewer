@@ -17,10 +17,11 @@ public class ConfigPageTests
         """;
 
     private readonly FakeEngine _engine = new();
+    private readonly FakeKeychain _keychain = new();
 
-    private ReposViewModel Repos() => new(_engine, new ConfigDocument(_engine));
+    private ReposViewModel Repos() => new(_engine, new ConfigDocument(_engine), _keychain);
 
-    private SettingsViewModel Settings() => new(_engine, new ConfigDocument(_engine));
+    private SettingsViewModel Settings() => new(_engine, new ConfigDocument(_engine), _keychain);
 
     private static SettingField Field(IEnumerable<SettingSection> sections, string path) =>
         sections.SelectMany(s => s.Fields).Single(f => f.Spec.Path == path);
@@ -75,9 +76,9 @@ public class ConfigPageTests
         var repos = Repos();
         await repos.LoadAsync();
 
-        repos.AddUrl = "https://bitbucket.org/acme/api";
+        repos.AddUrl = "https://github.com/acme";
         await repos.AddCommand.ExecuteAsync(null);
-        Assert.Equal("No account in the config for bitbucket.org; add one in Settings first.", repos.Error);
+        Assert.Equal("'https://github.com/acme' doesn't name a repo; expected owner/name.", repos.Error);
 
         repos.AddUrl = "https://github.com/ACME/api";
         await repos.AddCommand.ExecuteAsync(null);
@@ -316,12 +317,143 @@ public class ConfigPageTests
         await settings.AddAccountCommand.ExecuteAsync(null);
 
         Assert.Null(settings.Error);
-        Assert.Equal("accounts:\n  - { id: gl-work, provider: gitlab, host: \"https://gitlab.example.com\" }\n", _engine.ConfigYaml);
-        var account = Assert.Single(settings.Accounts);
-        Assert.True(account.CanRemove);
+        // github.com is written out, rather than replaced by an account on another host.
+        Assert.Equal(
+            "accounts:\n  - { id: github, provider: github }\n  - { id: gl-work, provider: gitlab, host: \"https://gitlab.example.com\" }\n",
+            _engine.ConfigYaml);
+        Assert.Equal(["github", "gl-work"], settings.Accounts.Select(a => a.Id));
+        Assert.All(settings.Accounts, a => Assert.True(a.CanRemove));
         Assert.False(settings.ImplicitAccount);
-        Assert.Equal("GITLAB_TOKEN isn't set.", account.Status);
+        Assert.Equal("GITLAB_TOKEN isn't set.", settings.Accounts[1].Status);
         Assert.Equal("", settings.NewAccountId);
+    }
+
+    [Fact]
+    public async Task Settings_AddAccount_SavesAPastedTokenInTheKeychain_AndMakesAnId()
+    {
+        _engine.ConfigYaml = "repos:\n  - repo: acme/api\n";
+        var settings = Settings();
+        await settings.LoadAsync();
+
+        settings.NewProvider = AccountConfig.GitLab;
+        Assert.Equal(new Uri("https://gitlab.com/-/user_settings/personal_access_tokens?name=Reviewer&scopes=api"), settings.TokenPage);
+        settings.NewToken = "glpat-abc123";
+        await settings.AddAccountCommand.ExecuteAsync(null);
+
+        Assert.Null(settings.Error);
+        Assert.Equal("glpat-abc123", _keychain.Items["reviewer/gitlab"]);
+        Assert.Equal(
+            "repos:\n  - repo: acme/api\n    account: github\n"
+            + "accounts:\n  - { id: github, provider: github }\n  - { id: gitlab, provider: gitlab, token: \"keychain:reviewer/gitlab\" }\n",
+            _engine.ConfigYaml);
+        Assert.DoesNotContain("glpat", _engine.ConfigYaml, StringComparison.Ordinal);
+        Assert.Equal("", settings.NewToken);
+    }
+
+    [Fact]
+    public async Task Settings_AddAccount_TakesAReferenceAsItIs()
+    {
+        _engine.ConfigYaml = "accounts:\n  - { id: gh, provider: github }\n";
+        var settings = Settings();
+        await settings.LoadAsync();
+
+        settings.NewAccountId = "gl";
+        settings.NewProvider = AccountConfig.GitLab;
+        settings.NewToken = "env:WORK_GITLAB_TOKEN";
+        await settings.AddAccountCommand.ExecuteAsync(null);
+
+        Assert.Null(settings.Error);
+        Assert.Empty(_keychain.Items);
+        Assert.EndsWith("  - { id: gl, provider: gitlab, token: \"env:WORK_GITLAB_TOKEN\" }\n", _engine.ConfigYaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Repos_UnknownHost_OffersToConnectIt_ThenWatchesTheRepo()
+    {
+        _engine.ConfigYaml = "repos:\n  - repo: acme/api\n";
+        var repos = Repos();
+        await repos.LoadAsync();
+
+        repos.AddUrl = "https://git.example.com/platform/billing/-/merge_requests/3";
+        await repos.AddCommand.ExecuteAsync(null);
+
+        Assert.Null(repos.Error);
+        var connect = Assert.IsType<ConnectAccountViewModel>(repos.Connect);
+        Assert.Equal(("Connect git.example.com", AccountConfig.GitLab, "git-example-com", "https://git.example.com"),
+            (connect.Title, connect.Provider, connect.Id, connect.Host));
+        Assert.Equal(new Uri("https://git.example.com/-/user_settings/personal_access_tokens?name=Reviewer&scopes=api"), connect.TokenPage);
+        Assert.Empty(_engine.Saves);
+
+        connect.Token = "glpat-abc123";
+        await connect.ConnectCommand.ExecuteAsync(null);
+
+        Assert.Null(connect.Problem);
+        Assert.Null(repos.Connect);
+        Assert.Null(repos.Error);
+        Assert.Equal("glpat-abc123", _keychain.Items["reviewer/git-example-com"]);
+        Assert.Equal(
+            "repos:\n  - repo: acme/api\n    account: github\n  - { repo: platform/billing, account: git-example-com }\n"
+            + "accounts:\n  - { id: github, provider: github }\n"
+            + "  - { id: git-example-com, provider: gitlab, host: \"https://git.example.com\", token: \"keychain:reviewer/git-example-com\" }\n",
+            _engine.ConfigYaml);
+        Assert.Equal(["github", "git-example-com"], repos.Watched.Select(r => r.Account));
+        Assert.Equal("", repos.AddUrl);
+    }
+
+    [Fact]
+    public async Task Repos_Connect_WithATokenThatDoesntWork_KeepsTheFormOpen_ThenConnectsWithAnother()
+    {
+        _engine.ConfigYaml = TwoAccounts;
+        _engine.AccountStatuses["gitlab"] = new AccountStatus("gitlab", false, null, "token rejected. 401 Unauthorized.");
+        var repos = Repos();
+        await repos.LoadAsync();
+        repos.AddUrl = "https://gitlab.com/acme/tools";
+        await repos.AddCommand.ExecuteAsync(null);
+        var connect = repos.Connect!;
+
+        connect.Token = "glpat-wrong";
+        await connect.ConnectCommand.ExecuteAsync(null);
+
+        Assert.Equal("Account 'gitlab' is saved, but it can't sign in: token rejected. 401 Unauthorized. Paste a token and connect again.", connect.Problem);
+        Assert.Same(connect, repos.Connect);
+        Assert.Single(_engine.Saves);
+        Assert.Equal("", connect.Token);
+
+        // The account is there now; the keychain item it names gets the new token, and the repo is watched.
+        _engine.AccountStatuses.Remove("gitlab");
+        connect.Token = "glpat-right";
+        await connect.ConnectCommand.ExecuteAsync(null);
+
+        Assert.Null(repos.Connect);
+        Assert.Equal("glpat-right", _keychain.Items["reviewer/gitlab"]);
+        Assert.Equal(2, _engine.Saves.Count);
+        Assert.EndsWith("repos:\n  - { repo: acme/tools, account: gitlab }\n", _engine.ConfigYaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Repos_Connect_ShowsWhyTheTokenWasntSaved()
+    {
+        var repos = Repos();
+        await repos.LoadAsync();
+        repos.AddUrl = "https://gitlab.com/acme/tools";
+        await repos.AddCommand.ExecuteAsync(null);
+
+        repos.Connect!.Token = "glpat abc";
+        await repos.Connect.ConnectCommand.ExecuteAsync(null);
+
+        Assert.StartsWith("That doesn't look like a token", repos.Connect.Problem, StringComparison.Ordinal);
+        Assert.Empty(_engine.Saves);
+    }
+
+    [Theory]
+    [InlineData("https://github.com/acme/api", null)]
+    [InlineData("https://git.example.com/gitlab/platform/billing", null)]
+    [InlineData("acme/api", null)]
+    [InlineData("https://git.example.com/other/billing", "https://git.example.com/")]
+    [InlineData("https://gitlab.com/acme/api/-/merge_requests/1", "https://gitlab.com/")]
+    public void RepoUrls_UnknownHost_IsTheHostNoAccountCovers(string url, string? host)
+    {
+        Assert.Equal(host, RepoUrls.UnknownHost(url, ConfigLoader.Parse(TwoAccounts).Accounts)?.AbsoluteUri);
     }
 
     [Fact]
@@ -353,8 +485,8 @@ public class ConfigPageTests
     public async Task BothPages_ShareTheFile_SoASaveOnOneShowsOnTheOther()
     {
         var config = new ConfigDocument(_engine);
-        var repos = new ReposViewModel(_engine, config);
-        var settings = new SettingsViewModel(_engine, config);
+        var repos = new ReposViewModel(_engine, config, _keychain);
+        var settings = new SettingsViewModel(_engine, config, _keychain);
         await repos.LoadAsync();
 
         var mode = Field(settings.Policy, "review.mode");

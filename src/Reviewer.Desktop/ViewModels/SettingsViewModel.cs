@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Reviewer.Api;
+using Reviewer.Cli;
 using Reviewer.Desktop.Services;
 using Reviewer.Engine.Config;
 
@@ -49,6 +50,7 @@ internal sealed partial class SettingsViewModel : PageViewModel
 
     private readonly IEngineClient _client;
     private readonly ConfigDocument _config;
+    private readonly IKeychain _keychain;
     private int _statusRound;
 
     [ObservableProperty]
@@ -72,10 +74,11 @@ internal sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty]
     private string _newToken = "";
 
-    public SettingsViewModel(IEngineClient client, ConfigDocument config)
+    public SettingsViewModel(IEngineClient client, ConfigDocument config, IKeychain keychain)
     {
         _client = client;
         _config = config;
+        _keychain = keychain;
         _config.Changed += Rebuild;
     }
 
@@ -89,7 +92,7 @@ internal sealed partial class SettingsViewModel : PageViewModel
 
     public bool CanEdit => _config.Config is not null;
 
-    /// <summary>The file has no accounts, so the implicit github.com one is in use; adding one replaces it.</summary>
+    /// <summary>The file has no accounts, so the implicit github.com one is in use; adding one writes it out too.</summary>
     public bool ImplicitAccount => CanEdit && Accounts.All(a => a.FileIndex is null);
 
     public override async Task LoadAsync()
@@ -124,33 +127,68 @@ internal sealed partial class SettingsViewModel : PageViewModel
     private void Revert() => Rebuild();
 
     [RelayCommand]
-    private Task AddAccountAsync()
+    private async Task AddAccountAsync()
     {
-        var id = NewAccountId.Trim();
-        if (id.Length == 0)
+        if (_config.Config is not { } config)
         {
-            Error = "The account needs an id, such as gh-main.";
-            return Task.CompletedTask;
+            return;
         }
 
-        var account = new JsonObject { ["id"] = id, ["provider"] = NewProvider };
-        if (NewHost.Trim() is { Length: > 0 } host)
+        Uri? host = null;
+        if (NewHost.Trim() is { Length: > 0 } text && !Uri.TryCreate(text, UriKind.Absolute, out host))
         {
-            account["host"] = host;
+            Error = $"'{text}' isn't a URL; give the host as https://gitlab.example.com.";
+            return;
         }
 
-        // A reference such as env:GITHUB_TOKEN or keychain:reviewer/gh-main; the token itself never goes in the file.
-        if (NewToken.Trim() is { Length: > 0 } token)
+        var id = NewAccountId.Trim() is { Length: > 0 } typed
+            ? typed
+            : AccountSetup.SuggestId(NewProvider, host ?? AccountSetup.DefaultHost(NewProvider), config.Accounts.Select(a => a.Id));
+        if (config.Accounts.Any(a => a.Id == id))
         {
-            account["token"] = token;
+            Error = $"There's already an account '{id}'.";
+            return;
         }
 
-        return TryAsync(async () =>
+        // A pasted token goes to the keychain, and the file names it; a reference such as env:GITLAB_TOKEN goes in as it is.
+        string? token;
+        try
         {
-            await _config.SaveAsync([new ConfigEdit(ConfigEditOp.Add, "accounts", account)]);
+            token = await AccountSetup.TokenReferenceAsync(_keychain, id, NewToken);
+        }
+        catch (KeychainException e)
+        {
+            Error = e.Message;
+            return;
+        }
+
+        await TryAsync(async () =>
+        {
+            await _config.SaveAsync(AccountSetup.AddEdits(_config.Settings, config, AccountSetup.Entry(id, NewProvider, host, token)));
             (NewAccountId, NewHost, NewToken) = ("", "", "");
         });
     }
+
+    /// <summary>Where the host field's hint points: the provider's own host, or what a self-hosted one looks like.</summary>
+    public string HostPlaceholder => NewProvider == AccountConfig.GitLab
+        ? "Host: empty for gitlab.com, or e.g. https://gitlab.example.com"
+        : "Host: github.com";
+
+    public string ScopeHint => AccountSetup.ScopeHint(NewProvider);
+
+    /// <summary>Creates a token for the account being added, on its host, with the scope reviewing needs.</summary>
+    public Uri TokenPage => AccountSetup.TokenPage(
+        NewProvider,
+        Uri.TryCreate(NewHost.Trim(), UriKind.Absolute, out var host) && host.Scheme == Uri.UriSchemeHttps ? host : AccountSetup.DefaultHost(NewProvider));
+
+    partial void OnNewProviderChanged(string value)
+    {
+        OnPropertyChanged(nameof(HostPlaceholder));
+        OnPropertyChanged(nameof(ScopeHint));
+        OnPropertyChanged(nameof(TokenPage));
+    }
+
+    partial void OnNewHostChanged(string value) => OnPropertyChanged(nameof(TokenPage));
 
     [RelayCommand]
     private Task RemoveAccountAsync(AccountItem account) => account.FileIndex is { } index

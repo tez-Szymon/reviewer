@@ -71,6 +71,17 @@ public sealed class ScreenTests
                 Capture(window, folder, $"{page.GetType().Name.Replace("ViewModel", "", StringComparison.Ordinal)}-{name}");
             }
 
+            // A URL on a host no account covers opens the form that connects it.
+            var reposPage = model.Pages.OfType<ReposViewModel>().Single();
+            model.SelectedPage = reposPage;
+            reposPage.AddUrl = "https://gitlab.example.com/platform/billing";
+            await reposPage.AddCommand.ExecuteAsync(null);
+            Assert.NotNull(reposPage.Connect);
+            reposPage.Connect.Problem = "Account 'gitlab-example-com' is saved, but it can't sign in: token rejected. Paste a token and connect again.";
+            Capture(window, folder, $"Repos-connect-{name}");
+            reposPage.Connect.CancelCommand.Execute(null);
+            reposPage.AddUrl = "";
+
             model.OpenJob("j-done");
             await ((JobDetailViewModel)model.Current).LoadAsync();
             Capture(window, folder, $"Review-{name}");

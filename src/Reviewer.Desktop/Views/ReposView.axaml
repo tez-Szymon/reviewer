@@ -41,7 +41,7 @@
     <Border DockPanel.Dock="Top" Classes="card" Padding="16" Margin="0,0,0,16" IsEnabled="{Binding CanEdit}">
       <StackPanel Spacing="10">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-          <TextBox PlaceholderText="Paste a repo's URL, such as https://github.com/acme/api" Text="{Binding AddUrl}">
+          <TextBox PlaceholderText="Paste a repo's URL, such as https://github.com/acme/api or https://gitlab.com/acme/api" Text="{Binding AddUrl}">
             <TextBox.InnerLeftContent>
               <c:Icon Data="{StaticResource Icon.Plus}" Margin="10,0,0,0" Foreground="{DynamicResource Text.Tertiary}" />
             </TextBox.InnerLeftContent>
@@ -53,6 +53,60 @@
             </StackPanel>
           </Button>
         </Grid>
+        <!-- The URL's host has no account yet: add one here, then watch the repo. -->
+        <ContentControl Content="{Binding Connect}" IsVisible="{Binding Connect, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <ContentControl.ContentTemplate>
+            <DataTemplate x:DataType="vm:ConnectAccountViewModel">
+              <Border Background="{DynamicResource Surface.Sunken}" CornerRadius="{StaticResource Radius.Medium}" Padding="16">
+                <StackPanel Spacing="10">
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                    <c:Icon Data="{StaticResource Icon.Plug}" VerticalAlignment="Top" Margin="0,2,0,0" />
+                    <StackPanel Grid.Column="1" Spacing="2">
+                      <TextBlock Classes="strong" Text="{Binding Title}" />
+                      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Lead}" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid ColumnDefinitions="160,*" ColumnSpacing="8">
+                    <TextBox PlaceholderText="Account id" Text="{Binding Id}"
+                             ToolTip.Tip="How repos and the keychain item name this account." />
+                    <TextBox Grid.Column="1" PlaceholderText="https://gitlab.example.com" Text="{Binding Host}" IsEnabled="{Binding IsGitLab}"
+                             ToolTip.Tip="The instance's URL. If your GitLab is served from a path, add it, such as https://example.com/gitlab." />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox PasswordChar="•" PlaceholderText="Paste a personal access token" Text="{Binding Token}">
+                      <TextBox.InnerLeftContent>
+                        <c:Icon Data="{StaticResource Icon.KeyRound}" Margin="10,0,0,0" Foreground="{DynamicResource Text.Tertiary}" />
+                      </TextBox.InnerLeftContent>
+                    </TextBox>
+                    <HyperlinkButton Grid.Column="1" VerticalAlignment="Center" NavigateUri="{Binding TokenPage}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Create a token" />
+                        <c:Icon Data="{StaticResource Icon.ExternalLink}" />
+                      </StackPanel>
+                    </HyperlinkButton>
+                  </Grid>
+                  <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding ScopeHint}" />
+                  <Border Classes="banner warning" IsVisible="{Binding Problem, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                      <c:Icon Data="{StaticResource Icon.TriangleAlert}" />
+                      <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Problem}" />
+                    </Grid>
+                  </Border>
+                  <ProgressBar Classes="loading" IsVisible="{Binding Busy}" />
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Command="{Binding CancelCommand}" Content="Cancel" />
+                    <Button Classes="accent" Command="{Binding ConnectCommand}" IsEnabled="{Binding !Busy}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <c:Icon Data="{StaticResource Icon.Plug}" />
+                        <TextBlock Text="Connect and watch" />
+                      </StackPanel>
+                    </Button>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ContentControl.ContentTemplate>
+        </ContentControl>
         <Expander Header="Browse an account's repos" HorizontalAlignment="Stretch">
           <StackPanel Spacing="10">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
@@ -97,7 +151,7 @@
           <StackPanel Classes="empty" Margin="16,40" IsVisible="{Binding !Watched.Count}">
             <Border Classes="emptyIcon"><c:Icon Data="{StaticResource Icon.FolderGit2}" /></Border>
             <TextBlock Classes="strong" Text="No repos watched yet" />
-            <TextBlock Classes="caption" Text="Paste a repo's URL above, or browse an account's repos." />
+            <TextBlock Classes="caption" Text="Paste a repo's URL above, from GitHub or any GitLab, or browse an account's repos." />
           </StackPanel>
           <ListBox x:Name="Watched" Classes="rows pick" ItemsSource="{Binding Watched}" SelectedItem="{Binding Selected}"
                    IsVisible="{Binding Watched.Count}">
