@@ -115,7 +115,11 @@ internal sealed class FakeEngine : IEngineClient
         return Task.FromResult(Queue.Single(j => j.Id == id));
     }
 
-    public Task<QueueResult> QueueReviewAsync(QueueRequest request, CancellationToken ct) => throw new NotSupportedException();
+    public Task<QueueResult> QueueReviewAsync(QueueRequest request, CancellationToken ct)
+    {
+        Calls.Add($"queue {request.Url}{(request.Full ? " full" : "")}");
+        return Task.FromResult(new QueueResult("new-job", Added: true));
+    }
 
     public Task<List<WatchedPullRequestDto>> ListPullsAsync(string? repo, CancellationToken ct) => Load(Pulls);
 

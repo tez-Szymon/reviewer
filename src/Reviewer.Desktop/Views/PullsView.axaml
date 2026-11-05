@@ -48,7 +48,7 @@
         <ListBox x:Name="List" Classes="rows" ItemsSource="{Binding Pulls}" IsVisible="{Binding Pulls.Count}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:PullItem">
-              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="16">
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="16">
                 <StackPanel Spacing="3" VerticalAlignment="Center">
                   <TextBlock Classes="strong" TextTrimming="CharacterEllipsis" Text="{Binding Title}" />
                   <StackPanel Orientation="Horizontal" Spacing="6">
@@ -64,7 +64,15 @@
                   <TextBlock Classes="caption" HorizontalAlignment="Right" IsVisible="{Binding HasJob}"
                              Text="{Binding LatestJobText, StringFormat='Latest job: {0}'}" />
                 </StackPanel>
-                <Button Grid.Column="2" Classes="ghost" IsEnabled="{Binding HasJob}" VerticalAlignment="Center"
+                <Button Grid.Column="2" Classes="ghost" VerticalAlignment="Center"
+                        ToolTip.Tip="Review the whole PR, even with no new commits"
+                        Command="{Binding #List.((vm:PullsViewModel)DataContext).ReviewAgainCommand}" CommandParameter="{Binding}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <c:Icon Data="{StaticResource Icon.RotateCcw}" />
+                    <TextBlock Text="{Binding ReviewActionText}" />
+                  </StackPanel>
+                </Button>
+                <Button Grid.Column="3" Classes="ghost" IsEnabled="{Binding HasJob}" VerticalAlignment="Center"
                         Command="{Binding #List.((vm:PullsViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
                   <StackPanel Orientation="Horizontal" Spacing="6">
                     <TextBlock Text="Latest review" />
