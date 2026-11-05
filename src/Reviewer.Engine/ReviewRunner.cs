@@ -202,12 +202,13 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
         }
 
         // The author changed the code of a finding the agent found still there: say why on its thread, so the push
-        // doesn't go unanswered. Only when this delta changed its file and lines, so an unrelated push adds no noise.
+        // doesn't go unanswered. Only when the push since the last review changed its lines, so a later push elsewhere
+        // in the file adds no noise.
+        var touchedNow = await builder.FindTouchedSinceAsync(stillOpen, previous?.State.HeadSha, snapshot.HeadSha, ct).ConfigureAwait(false);
         var answered = stillOpen
             .Where(o => verdicts.GetValueOrDefault(o.Fingerprint) is { Status: EarlierFindingStatus.Open } verdict
                 && verdict.Reason.Trim().Length > 0
-                && touched.Contains(o.Fingerprint)
-                && prepared.Scope.ChangedLines.ContainsKey(o.Finding.File))
+                && touchedNow.Contains(o.Fingerprint))
             .Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
         plan = plan with
         {

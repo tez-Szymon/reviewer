@@ -357,6 +357,49 @@ public sealed class ReReviewTests : IDisposable
     }
 
     [Fact]
+    public async Task AgentFindsItOpen_AfterAFailedFix_ALaterPushElsewhereInTheFile_DoesNotReplyAgain()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        var id = await EarlierIdAsync();
+        Edit(3, "BUG, renamed");
+        _source.Commit("attempt a fix");
+        _agent.Reports.Enqueue(new FindingsReport("not fixed", []) { EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Open, "Still there.")] });
+        await ReviewAsync();
+        Edit(9, "unrelated"); // Same file, other lines.
+        _source.Commit("unrelated change");
+        _agent.Reports.Enqueue(new FindingsReport("fine", []) { EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Open, "Still there.")] });
+
+        var third = await ReviewAsync();
+
+        Assert.Equal(ReviewDecision.RequestChanges, third.Plan.Decision);
+        Assert.Empty(third.Plan.CommentsToReply);
+        Assert.Single(_provider.Replies); // Only from the attempted fix.
+    }
+
+    [Fact]
+    public async Task AgentFindsItOpen_ASecondAttemptOnShiftedLines_RepliesAgain()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        var id = await EarlierIdAsync();
+        Edit(3, "BUG, renamed");
+        _source.Commit("attempt a fix");
+        _agent.Reports.Enqueue(new FindingsReport("not fixed", []) { EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Open, "Still there.")] });
+        await ReviewAsync();
+        var path = Path.Combine(_source.Path, "src", "app.txt");
+        _source.Write("src/app.txt", ["new top", .. File.ReadAllLines(path)]); // The bug moves to line 4.
+        _source.Commit("shift lines");
+        Edit(4, "BUG, again");
+        _source.Commit("second attempt");
+        _agent.Reports.Enqueue(new FindingsReport("not fixed", []) { EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Open, "Still there.")] });
+
+        await ReviewAsync();
+
+        Assert.Equal(2, _provider.Replies.Count);
+    }
+
+    [Fact]
     public async Task AgentSaysFixed_ButReportsItAgain_StaysOpen()
     {
         _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));

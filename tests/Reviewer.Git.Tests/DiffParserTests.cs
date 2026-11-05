@@ -161,4 +161,40 @@ public class DiffParserTests
 
         Assert.Equal(["new.txt", "gone.txt"], DiffParser.FilePatchIds(patch).Keys);
     }
+
+    [Theory]
+    [InlineData(2, 2, 2, 2)]   // Before every hunk: unchanged.
+    [InlineData(5, 5, 5, 6)]   // Changed: maps to both lines that replaced it.
+    [InlineData(8, 8, 11, 11)] // After the insertion after line 7: shifted by both hunks.
+    [InlineData(7, 7, 8, 8)]   // The insertion is after line 7, so line 7 moves only by the first hunk.
+    [InlineData(4, 9, 4, 12)]  // A range spanning both.
+    public void MapSpan_ShiftsAndFollowsChangedLines(int start, int end, int newStart, int newEnd)
+    {
+        const string patch = """
+            diff --git a/f.txt b/f.txt
+            --- a/f.txt
+            +++ b/f.txt
+            @@ -5 +5,2 @@
+            -five
+            +FIVE
+            +six-ish
+            @@ -7,0 +9,2 @@
+            +new
+            +new
+            """;
+
+        Assert.Equal(new LineSpan(newStart, newEnd), DiffParser.MapSpan(patch, new LineSpan(start, end)));
+    }
+
+    [Fact]
+    public void MapSpan_DeletedLines_MapToTheLineAfter_AndADeletedFileToNull()
+    {
+        const string deletion = "--- a/f.txt\n+++ b/f.txt\n@@ -3,2 +2,0 @@\n-a\n-b";
+        const string deleted = "--- a/f.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b";
+
+        Assert.Equal(new LineSpan(3, 3), DiffParser.MapSpan(deletion, new LineSpan(3, 4)));
+        Assert.Equal(new LineSpan(4, 4), DiffParser.MapSpan(deletion, new LineSpan(6, 6)));
+        Assert.Null(DiffParser.MapSpan(deleted, new LineSpan(1, 1)));
+        Assert.Equal(new LineSpan(3, 3), DiffParser.MapSpan("", new LineSpan(3, 3)));
+    }
 }

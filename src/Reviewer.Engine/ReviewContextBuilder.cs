@@ -187,6 +187,50 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         return touched;
     }
 
+    /// <summary>
+    /// Fingerprints of <paramref name="open"/> findings whose lines changed between <paramref name="since"/> (the last
+    /// reviewed head) and <paramref name="head"/>: what the latest push touched. Each finding's lines are first carried
+    /// from the head it was reported against to <paramref name="since"/>. One that can't be followed there (a commit
+    /// gone, the file deleted or renamed) counts as untouched.
+    /// </summary>
+    public async Task<IReadOnlySet<string>> FindTouchedSinceAsync(
+        IReadOnlyList<OpenFinding> open, string? since, string head, CancellationToken ct)
+    {
+        var touched = new HashSet<string>(StringComparer.Ordinal);
+        if (open.Count == 0 || since is null || !await git.HasCommitAsync(since, ct).ConfigureAwait(false))
+        {
+            return touched;
+        }
+
+        var changed = await git.ChangedOldLinesAsync(since, head, ct).ConfigureAwait(false);
+        foreach (var o in open)
+        {
+            if (!changed.TryGetValue(o.Finding.File, out var spans))
+            {
+                continue;
+            }
+
+            var lines = new LineSpan(o.Finding.StartLine, o.Finding.EndLine);
+            if (!string.Equals(o.HeadSha, since, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!await git.HasCommitAsync(o.HeadSha, ct).ConfigureAwait(false)
+                    || await git.MapLinesAsync(o.HeadSha, since, o.Finding.File, lines, ct).ConfigureAwait(false) is not { } mapped)
+                {
+                    continue;
+                }
+
+                lines = mapped;
+            }
+
+            if (spans.Any(s => s.Overlaps(lines.Start, lines.End)))
+            {
+                touched.Add(o.Fingerprint);
+            }
+        }
+
+        return touched;
+    }
+
     /// <summary>Keeps the reviewed head in the local repository, so a later force-push can't let git prune it.</summary>
     public Task KeepReviewedHeadAsync(PullRequestRef pr, string headSha, CancellationToken ct) =>
         git.UpdateRefAsync($"{RefPrefix(pr)}/reviewed", headSha, ct);

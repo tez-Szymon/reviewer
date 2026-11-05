@@ -31,6 +31,12 @@ public interface IGitRepository
     /// </remarks>
     Task<IReadOnlyDictionary<string, IReadOnlyList<LineSpan>>> ChangedOldLinesAsync(string fromSha, string toSha, CancellationToken ct);
 
+    /// <summary>
+    /// Where <paramref name="lines"/> of <paramref name="path"/> at <paramref name="fromSha"/> are at
+    /// <paramref name="toSha"/>. Lines that changed map to what replaced them. Null when the file is gone, renames included.
+    /// </summary>
+    Task<LineSpan?> MapLinesAsync(string fromSha, string toSha, string path, LineSpan lines, CancellationToken ct);
+
     /// <summary>True when <paramref name="sha"/> names a commit present in this repository.</summary>
     Task<bool> HasCommitAsync(string sha, CancellationToken ct);
 
