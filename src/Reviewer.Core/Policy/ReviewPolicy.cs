@@ -77,9 +77,15 @@ public sealed record ReviewPlan(
     /// <summary>Blocking findings from earlier reviews that are still open; they count toward the decision but aren't posted again.</summary>
     public IReadOnlyList<Finding> OpenBlockingFindings { get; init; } = [];
 
+    /// <summary>Threads of earlier findings that are still open, each with a note on why, to reply to without resolving.</summary>
+    public IReadOnlyList<ThreadNote> CommentsToReply { get; init; } = [];
+
     /// <summary>Kept findings left out of this review's comments because the PR already has them.</summary>
     public IReadOnlyList<Finding> AlreadyPosted { get; init; } = [];
 
     /// <summary>Changes were wanted but the provider can't request them: withdraw any approval this account gave earlier.</summary>
     public bool WithdrawApproval { get; init; }
 }
+
+/// <summary>A note to post on one of this tool's threads.</summary>
+public sealed record ThreadNote(PublishedComment Comment, string Note);

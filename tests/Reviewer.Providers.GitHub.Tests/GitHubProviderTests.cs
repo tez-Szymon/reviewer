@@ -204,6 +204,18 @@ public class GitHubProviderTests
     }
 
     [Fact]
+    public async Task ReplyToComment_PostsTheDefusedNote_WithoutResolving()
+    {
+        var github = new FakeGitHub().On($"POST {Pull}/comments/9/replies", "{}");
+
+        await github.Provider().ReplyToCommentAsync(Pr, new PublishedComment("9", "fp", "a.cs", 3), "Still open, ping @alice", Ct);
+
+        var request = Assert.Single(github.Requests);
+        Assert.Equal($"POST {Pull}/comments/9/replies", request.Route);
+        Assert.DoesNotContain("@alice", request.Body!.Value.GetProperty("body").GetString()!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ResolveComment_AlreadyResolvedThread_IsLeftAlone()
     {
         var github = new FakeGitHub().On("POST graphql", Threads(("T1", true, 1)));

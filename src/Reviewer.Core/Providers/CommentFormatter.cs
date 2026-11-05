@@ -120,6 +120,26 @@ public static partial class CommentFormatter
         return string.Join("\n\n", sections);
     }
 
+    /// <summary>
+    /// Findings from earlier reviews that are still open, collapsed, each with the agent's reason when it gave one.
+    /// Empty when there are none.
+    /// </summary>
+    public static string StillOpen(IReadOnlyList<(Finding Finding, string? Reason)> findings)
+    {
+        if (findings.Count == 0)
+        {
+            return "";
+        }
+
+        var rows = findings.Select(x =>
+        {
+            var f = x.Finding;
+            var why = x.Reason is { } reason && OneLine(reason) is { Length: > 0 } line ? $": {Inline(line)}" : "";
+            return $"- **{Label(f.Severity)} · {Label(f.Category)}** `{f.File}:{f.StartLine}` {Inline(OneLine(f.Title))}{why}";
+        });
+        return Collapsed("Still open from earlier reviews", $" ({findings.Count})", string.Join("\n", rows));
+    }
+
     /// <summary>A short note from the engine, e.g. why a thread was resolved. No marker: it's not a finding.</summary>
     public static string Note(string text) => Truncate(Defuse(text));
 

@@ -50,5 +50,7 @@ internal sealed class FakeProvider : IRepositoryProvider
 
     public Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct) => throw new NotSupportedException();
 
+    public Task ReplyToCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct) => throw new NotSupportedException();
+
     public Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct) => throw new NotSupportedException();
 }

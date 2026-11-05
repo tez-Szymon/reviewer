@@ -258,14 +258,16 @@ public sealed class GitHubProvider(HttpClient http) : IRepositoryProvider
             return; // Someone resolved it already; a late note would only add noise.
         }
 
-        using (var reply = await _http.PostAsJsonAsync(
-            $"{PullPath(pr)}/comments/{Uri.EscapeDataString(comment.ProviderId)}/replies", new ReplyRequest(CommentFormatter.Note(note)), Json, ct)
-            .ConfigureAwait(false))
-        {
-            await EnsureSuccessAsync(reply, ct).ConfigureAwait(false);
-        }
-
+        await ReplyToCommentAsync(pr, comment, note, ct).ConfigureAwait(false);
         await GraphQlAsync<ResolveData>(ResolveMutation, new { threadId = thread.Id }, ct).ConfigureAwait(false);
+    }
+
+    public async Task ReplyToCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct)
+    {
+        using var reply = await _http.PostAsJsonAsync(
+            $"{PullPath(pr)}/comments/{Uri.EscapeDataString(comment.ProviderId)}/replies", new ReplyRequest(CommentFormatter.Note(note)), Json, ct)
+            .ConfigureAwait(false);
+        await EnsureSuccessAsync(reply, ct).ConfigureAwait(false);
     }
 
     /// <summary>Review threads by the REST id of their first comment.</summary>

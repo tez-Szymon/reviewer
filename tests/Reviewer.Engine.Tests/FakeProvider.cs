@@ -52,6 +52,14 @@ internal sealed class FakeProvider(PullRequestSnapshot snapshot) : IRepositoryPr
         return Task.CompletedTask;
     }
 
+    public List<(PublishedComment Comment, string Note)> Replies { get; } = [];
+
+    public Task ReplyToCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct)
+    {
+        Replies.Add((comment, note));
+        return Task.CompletedTask;
+    }
+
     public IAsyncEnumerable<RepoRef> ListAccessibleReposAsync(string? owner, CancellationToken ct) => throw new NotSupportedException();
 
     /// <summary>The open PRs <see cref="ListOpenPullRequestsAsync"/> lists, under <see cref="ListETag"/>.</summary>

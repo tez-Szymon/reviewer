@@ -51,10 +51,11 @@ public sealed record ReviewOutcome(
 /// only through the policy engine's plan. Every run is recorded in the store, including the ones that fail.
 /// </summary>
 /// <remarks>
-/// A re-review covers only what's new, so findings from earlier reviews are tracked here. One whose lines changed and
-/// that wasn't reported again is fixed, and its thread is resolved with a note. One whose thread a person resolved is
-/// dismissed. Any other stays open, isn't posted again, and if it was blocking it keeps blocking: approving needs
-/// every blocker fixed or dismissed, not only the ones in the latest delta.
+/// A re-review covers only what's new, so findings from earlier reviews are tracked here. The agent checks each one
+/// against the head; one it finds fixed has its thread resolved with the agent's reason. One whose thread a person
+/// resolved is dismissed and isn't checked. Any other stays open, isn't posted again, and if it was blocking it keeps
+/// blocking: approving needs every blocker fixed or dismissed, not only the ones in the latest delta. When the author
+/// changed the code of one that's still open, its thread gets a reply saying why.
 /// </remarks>
 public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuilder builder, IReviewAgent agent, ReviewStore store)
 {
@@ -138,8 +139,16 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             return new ReviewOutcome(jobId, null, snapshot, delta, new FindingsReport("", []), nothing, Published: false, Skipped: true);
         }
 
+        // Earlier findings still open on the PR go to the agent to check. One whose thread a person resolved is dismissed:
+        // a person's call stands, so it isn't checked.
+        var open = await store.GetOpenFindingsAsync(pr, ct).ConfigureAwait(false);
+        var own = await provider.GetOwnCommentsAsync(pr, ct).ConfigureAwait(false);
+        var resolvedOnPr = own.Where(c => c.IsResolved).Select(c => c.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        var dismissed = open.Where(o => resolvedOnPr.Contains(o.Fingerprint)).Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        var toCheck = open.Where(o => !dismissed.Contains(o.Fingerprint)).ToList();
+
         await using var prepared = await builder
-            .PrepareAsync(jobId, snapshot, deltaPlan, tokenOwner, request.Instructions, request.Timeout, ct)
+            .PrepareAsync(jobId, snapshot, deltaPlan, tokenOwner, request.Instructions, request.Timeout, ct, toCheck)
             .ConfigureAwait(false);
         var attempt = prepared.Context.AttemptFolder;
         await store.UpdateJobAsync(jobId, snapshot, delta, attempt, ct).ConfigureAwait(false);
@@ -152,19 +161,21 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             fingerprints[finding] = FindingFingerprint.Compute(finding, snippet);
         }
 
-        // Earlier findings are fixed when their lines changed and the agent didn't report them again, and dismissed when
-        // a person resolved their thread on the PR; the rest stay open. Open blockers block even when reported again:
-        // a re-report outside this delta wouldn't block by itself.
-        var open = await store.GetOpenFindingsAsync(pr, ct).ConfigureAwait(false);
-        var own = await provider.GetOwnCommentsAsync(pr, ct).ConfigureAwait(false);
-        var resolvedOnPr = own.Where(c => c.IsResolved).Select(c => c.Fingerprint).ToHashSet(StringComparer.Ordinal);
-        var dismissed = open.Where(o => resolvedOnPr.Contains(o.Fingerprint)).Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        // The agent's verdict decides whether an earlier finding is fixed, wherever the fix is. Without one (an older
+        // agent, or one it skipped), it's fixed when its lines changed and it wasn't reported again. A re-report always
+        // keeps it open. Open blockers block even when reported again: a re-report outside this delta wouldn't block by itself.
         var reported = fingerprints.Values.ToHashSet(StringComparer.Ordinal);
-        var touched = await builder.FindTouchedAsync(open, snapshot.HeadSha, ct).ConfigureAwait(false);
-        var fixedFingerprints = open
-            .Where(o => !dismissed.Contains(o.Fingerprint) && !reported.Contains(o.Fingerprint) && touched.Contains(o.Fingerprint))
+        var verdicts = Verdicts(report, toCheck);
+        var touched = await builder.FindTouchedAsync(toCheck, snapshot.HeadSha, ct).ConfigureAwait(false);
+        var fixedFingerprints = toCheck
+            .Where(o => !reported.Contains(o.Fingerprint) && verdicts.GetValueOrDefault(o.Fingerprint)?.Status switch
+            {
+                EarlierFindingStatus.Fixed => true,
+                EarlierFindingStatus.Open => false,
+                _ => touched.Contains(o.Fingerprint),
+            })
             .Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
-        var stillOpen = open.Where(o => !dismissed.Contains(o.Fingerprint) && !fixedFingerprints.Contains(o.Fingerprint)).ToList();
+        var stillOpen = toCheck.Where(o => !fixedFingerprints.Contains(o.Fingerprint)).ToList();
 
         // A person's call stands: a dismissed finding reported again doesn't block. It's kept in the report, so history
         // shows it, as dropped. Checked against the PR, not `dismissed`: once a review records the dismissal the finding
@@ -190,6 +201,22 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             plan = plan with { CommentsToResolve = [.. own.Where(c => !c.IsResolved && fixedFingerprints.Contains(c.Fingerprint))] };
         }
 
+        // The author changed the code of a finding the agent found still there: say why on its thread, so the push
+        // doesn't go unanswered. Only when this delta changed its file and lines, so an unrelated push adds no noise.
+        var answered = stillOpen
+            .Where(o => verdicts.GetValueOrDefault(o.Fingerprint) is { Status: EarlierFindingStatus.Open } verdict
+                && verdict.Reason.Trim().Length > 0
+                && touched.Contains(o.Fingerprint)
+                && prepared.Scope.ChangedLines.ContainsKey(o.Finding.File))
+            .Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        plan = plan with
+        {
+            CommentsToReply = [.. own
+                .Where(c => !c.IsResolved && answered.Contains(c.Fingerprint))
+                .DistinctBy(c => c.Fingerprint)
+                .Select(c => new ThreadNote(c, $"Still open in {Short(prepared.Scope.ReviewedHeadSha)}: {verdicts[c.Fingerprint].Reason.Trim()}"))],
+        };
+
         await File.WriteAllTextAsync(Path.Combine(attempt, PlanFile), JsonSerializer.Serialize(plan, PlanJson), ct)
             .ConfigureAwait(false);
 
@@ -201,7 +228,11 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             var head = prepared.Scope.ReviewedHeadSha;
             var reReview = delta.Kind != DeltaKind.Full;
             var footer = Footer(delta, head, fixedFingerprints.Count, dismissed.Count, stillOpen.Count, plan.OpenBlockingFindings.Count);
-            var details = CommentFormatter.Details(considered, reReview);
+            var details = string.Join("\n\n", new[]
+            {
+                CommentFormatter.Details(considered, reReview),
+                CommentFormatter.StillOpen([.. stillOpen.Select(o => (o.Finding, verdicts.GetValueOrDefault(o.Fingerprint)?.Reason))]),
+            }.Where(d => d.Length > 0));
             var result = new ReviewResult(
                 CommentFormatter.Headline(considered with { Summary = plan.Summary }, [.. plan.InlineFindings, .. plan.SummaryFindings], reReview),
                 [.. plan.InlineFindings.Select(f => new InlineComment(f, fingerprints[f]))],
@@ -220,12 +251,27 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
             {
                 try
                 {
-                    await provider.ResolveCommentAsync(
-                        pr, comment, $"Fixed in {Short(head)}: this code changed and the review didn't find the issue again.", ct).ConfigureAwait(false);
+                    var why = verdicts.GetValueOrDefault(comment.Fingerprint) is { Status: EarlierFindingStatus.Fixed, Reason: var reason }
+                        && reason.Trim().Length > 0
+                        ? reason.Trim()
+                        : "this code changed and the review didn't find the issue again.";
+                    await provider.ResolveCommentAsync(pr, comment, $"Fixed in {Short(head)}: {why}", ct).ConfigureAwait(false);
                 }
                 catch (Exception e) when (e is not OperationCanceledException)
                 {
                     warnings.Add($"Couldn't resolve the thread at {comment.File}:{comment.Line}: {e.Message}");
+                }
+            }
+
+            foreach (var reply in plan.CommentsToReply)
+            {
+                try
+                {
+                    await provider.ReplyToCommentAsync(pr, reply.Comment, reply.Note, ct).ConfigureAwait(false);
+                }
+                catch (Exception e) when (e is not OperationCanceledException)
+                {
+                    warnings.Add($"Couldn't reply on the thread at {reply.Comment.File}:{reply.Comment.Line}: {e.Message}");
                 }
             }
 
@@ -258,6 +304,16 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
         };
         await store.CompleteJobAsync(jobId, outcome, fingerprints, deltaPlan.Current, [.. fixedFingerprints, .. dismissed], CancellationToken.None).ConfigureAwait(false);
         return outcome;
+    }
+
+    /// <summary>The agent's verdict on each earlier finding it was asked about, by fingerprint. Unknown ids are ignored.</summary>
+    internal static Dictionary<string, EarlierFindingCheck> Verdicts(FindingsReport report, IReadOnlyList<OpenFinding> asked)
+    {
+        var ids = asked.Select(o => o.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        return (report.EarlierFindings ?? [])
+            .Where(v => ids.Contains(v.Id))
+            .DistinctBy(v => v.Id, StringComparer.Ordinal)
+            .ToDictionary(v => v.Id, StringComparer.Ordinal);
     }
 
     /// <summary>Moves kept findings the PR already has out of the comments. The decision doesn't change: an old blocker still blocks.</summary>

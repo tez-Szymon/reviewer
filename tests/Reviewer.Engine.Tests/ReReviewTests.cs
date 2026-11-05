@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Reviewer.Core.Agents;
 using Reviewer.Core.Findings;
 using Reviewer.Core.Policy;
@@ -263,6 +264,119 @@ public sealed class ReReviewTests : IDisposable
         Assert.Equal(first.Snapshot.HeadSha, real.Delta.FromSha);
         Assert.Equal(1, real.Resolved);
     }
+
+    [Fact]
+    public async Task EarlierFindings_AreListedInContextJson_ForTheAgentToCheck()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        var first = await ReviewAsync();
+        var id = await EarlierIdAsync();
+        Edit(9, "unrelated");
+        _source.Commit("unrelated change");
+        _agent.Reports.Enqueue(new FindingsReport("fine", []));
+
+        await ReviewAsync();
+
+        using var context = JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(_agent.Contexts[1].AttemptFolder, ReviewContextBuilder.ContextFile), Ct));
+        var earlier = Assert.Single(context.RootElement.GetProperty("earlierFindings").EnumerateArray());
+        Assert.Equal(id, earlier.GetProperty("id").GetString());
+        Assert.Equal("src/app.txt", earlier.GetProperty("file").GetString());
+        Assert.Equal(3, earlier.GetProperty("startLine").GetInt32());
+        Assert.Equal(first.Snapshot.HeadSha, earlier.GetProperty("reportedAt").GetString());
+        Assert.Equal("major", earlier.GetProperty("severity").GetString());
+    }
+
+    [Fact]
+    public async Task AgentFindsItFixed_ResolvesTheThread_EvenWhenTheFixIsElsewhere()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        var id = await EarlierIdAsync();
+        Edit(9, "guard"); // The fix is a guard elsewhere; line 3 is untouched.
+        _source.Commit("guard against the bug");
+        _agent.Reports.Enqueue(new FindingsReport("fixed", [])
+        {
+            EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Fixed, "Line 9 now guards it.")],
+        });
+
+        var second = await ReviewAsync();
+
+        Assert.Equal(ReviewDecision.Approve, second.Plan.Decision);
+        Assert.Equal(1, second.Resolved);
+        Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));
+        var (_, note) = Assert.Single(_provider.Resolutions);
+        Assert.Equal($"Fixed in {second.Snapshot.HeadSha[..7]}: Line 9 now guards it.", note);
+        Assert.Empty(_provider.Replies);
+    }
+
+    [Fact]
+    public async Task AgentFindsItOpen_AfterItsLinesChanged_RepliesWhy_AndKeepsRequestingChanges()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        var id = await EarlierIdAsync();
+        Edit(3, "BUG, renamed");
+        _source.Commit("attempt a fix");
+        _agent.Reports.Enqueue(new FindingsReport("not fixed", [])
+        {
+            EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Open, "The value is still read before the check.")],
+        });
+
+        var second = await ReviewAsync();
+
+        Assert.Equal(ReviewDecision.RequestChanges, second.Plan.Decision);
+        Assert.Equal((0, 1), (second.Resolved, second.StillOpen));
+        Assert.Empty(_provider.Resolutions);
+        var (comment, note) = Assert.Single(_provider.Replies);
+        Assert.Equal("c0", comment.ProviderId);
+        Assert.Equal($"Still open in {second.Snapshot.HeadSha[..7]}: The value is still read before the check.", note);
+        Assert.Contains("Still open from earlier reviews", _provider.Published[1].Details, StringComparison.Ordinal);
+        Assert.Contains("The value is still read before the check.", _provider.Published[1].Details, StringComparison.Ordinal);
+        Assert.Single(await _store.GetOpenFindingsAsync(Pr, Ct));
+    }
+
+    [Fact]
+    public async Task AgentFindsItOpen_AfterAnUnrelatedPush_DoesNotReply()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        var id = await EarlierIdAsync();
+        Edit(9, "unrelated");
+        _source.Commit("unrelated change");
+        _agent.Reports.Enqueue(new FindingsReport("fine", [])
+        {
+            EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Open, "Still there.")],
+        });
+
+        var second = await ReviewAsync();
+
+        Assert.Equal(ReviewDecision.RequestChanges, second.Plan.Decision);
+        Assert.Empty(_provider.Replies);
+        Assert.Empty(second.Plan.CommentsToReply);
+    }
+
+    [Fact]
+    public async Task AgentSaysFixed_ButReportsItAgain_StaysOpen()
+    {
+        _agent.Reports.Enqueue(new FindingsReport("bug", [Bug]));
+        await ReviewAsync();
+        var id = await EarlierIdAsync();
+        Edit(9, "unrelated");
+        _source.Commit("unrelated change");
+        _agent.Reports.Enqueue(new FindingsReport("confused", [Bug with { Id = "again" }])
+        {
+            EarlierFindings = [new EarlierFindingCheck(id, EarlierFindingStatus.Fixed, "Looks fixed.")],
+        });
+
+        var second = await ReviewAsync();
+
+        Assert.Equal(ReviewDecision.RequestChanges, second.Plan.Decision);
+        Assert.Equal((0, 1), (second.Resolved, second.StillOpen));
+        Assert.Empty(_provider.Resolutions);
+    }
+
+    private async Task<string> EarlierIdAsync() => Assert.Single(await _store.GetOpenFindingsAsync(Pr, Ct)).Fingerprint;
 
     private sealed class ScriptedAgent : IReviewAgent
     {

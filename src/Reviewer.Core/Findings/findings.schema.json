@@ -34,6 +34,19 @@
     },
     "checked": { "type": ["array", "null"], "items": { "type": "string" } },
     "notVerified": { "type": ["array", "null"], "items": { "type": "string" } },
+    "earlierFindings": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "reason"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["fixed", "open"] },
+          "reason": { "type": "string" }
+        }
+      }
+    },
     "findings": {
       "type": "array",
       "items": {
