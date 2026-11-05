@@ -29,11 +29,22 @@ internal sealed class AccountConnection : IDisposable
 
     public IRepositoryProvider Provider { get; }
 
+    /// <summary>Whether this connection signs in with <paramref name="token"/>.</summary>
+    public bool Uses(string? token) => string.Equals(_token, token, StringComparison.Ordinal);
+
     /// <exception cref="InvalidOperationException">No token was found, or its keychain item couldn't be read (<see cref="KeychainException"/>).</exception>
-    public static async Task<AccountConnection> OpenAsync(IProcessRunner processes, AccountConfig account, CancellationToken ct)
+    public static async Task<AccountConnection> OpenAsync(IProcessRunner processes, AccountConfig account, CancellationToken ct) =>
+        Open(account, await AccountToken.ResolveAsync(processes, account, ct).ConfigureAwait(false));
+
+    /// <param name="token">The account's token, as <see cref="AccountToken.ResolveAsync(IProcessRunner, AccountConfig, CancellationToken)"/> found it.</param>
+    /// <exception cref="InvalidOperationException"><paramref name="token"/> is null: none was found.</exception>
+    public static AccountConnection Open(AccountConfig account, string? token)
     {
-        var token = await AccountToken.ResolveAsync(processes, account, ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException(AccountToken.Missing(account));
+        if (token is null)
+        {
+            throw new InvalidOperationException(AccountToken.Missing(account));
+        }
+
         if (account.Provider == AccountConfig.GitLab)
         {
             var gitlab = GitLabProvider.CreateHttpClient(account.Host, token);
