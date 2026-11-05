@@ -65,6 +65,9 @@ internal sealed class FakeGit(Dictionary<string, string> files) : IGitRepository
     public Task<IReadOnlyDictionary<string, IReadOnlyList<LineSpan>>> ChangedOldLinesAsync(string fromSha, string toSha, CancellationToken ct) =>
         throw new NotSupportedException();
 
+    public Task<LineSpan?> MapLinesAsync(string fromSha, string toSha, string path, LineSpan lines, CancellationToken ct) =>
+        throw new NotSupportedException();
+
     public Task<bool> HasCommitAsync(string sha, CancellationToken ct) => throw new NotSupportedException();
 
     public Task UpdateRefAsync(string name, string sha, CancellationToken ct) => throw new NotSupportedException();

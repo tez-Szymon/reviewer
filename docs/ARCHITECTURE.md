@@ -72,6 +72,7 @@ public interface IRepositoryProvider
     Task<IReadOnlyList<PublishedComment>> GetOwnCommentsAsync(PullRequestRef pr, CancellationToken ct);
     Task PublishReviewAsync(PullRequestRef pr, ReviewResult result, CancellationToken ct);
     Task ResolveCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct);
+    Task ReplyToCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct);
     Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct);
 }
 ```
@@ -291,11 +292,11 @@ Rules (`TriggerRules`, pure) act on **changes**, not on state: each poll compare
 
 The agent always gets the whole PR checkout, so it can read surrounding code. Only the review target is narrowed. `context.json` names the delta's kind and reason, and the core contract tells the agent that on a re-review the rest was reviewed already.
 
-**Findings across reviews.** A finding posted by a published review (inline or in the summary) stays *open* until a later review resolves it:
+**Findings across reviews.** A finding posted by a published review (inline or in the summary) stays *open* until a later review resolves it. On a re-review, `context.json` lists the open ones under `earlierFindings` (id = fingerprint, lines as of the head each was reported against), and the agent checks each against the current code, wherever a fix might be, returning `fixed` or `open` with a one-sentence reason in the report's `earlierFindings`.
 
-- **Fixed** when its lines changed since the head it was reported against (old-side lines of `thatHead..newHead`; a deleted file counts as changed) and the agent didn't report its fingerprint again. After the review is published, its inline thread gets a short reply ("Fixed in `<sha>`…") and is resolved (GitHub: REST reply, GraphQL `resolveReviewThread`). A thread that can't be resolved is a warning, not a failed review; the finding counts as fixed either way. Dry runs list the threads they would resolve.
-- **Dismissed** when a person resolved its thread on the PR. A person's call stands: it no longer blocks, even if the agent reports it again, and it isn't posted again.
-- **Still open** otherwise, including when reported again. It isn't posted again, and the PR's own comments with our fingerprint marker are checked as well. An open blocking finding keeps blocking under the current policy's filter and blocking rules, wherever it is, so `approve` and `gate` never approve a PR on a delta that left an earlier blocker untouched.
+- **Fixed** when the agent says so, or, without a verdict for it (an older agent, or one it skipped), when its lines changed since the head it was reported against (old-side lines of `thatHead..newHead`; a deleted file counts as changed). Either way only if the agent didn't report its fingerprint again. After the review is published, its inline thread gets a short reply ("Fixed in `<sha>`: <the agent's reason>") and is resolved (GitHub: REST reply, GraphQL `resolveReviewThread`). A thread that can't be resolved is a warning, not a failed review; the finding counts as fixed either way. Dry runs list the threads they would resolve.
+- **Dismissed** when a person resolved its thread on the PR. A person's call stands: it isn't sent to the agent to check, it no longer blocks, even if the agent reports it again, and it isn't posted again.
+- **Still open** otherwise, including when the agent says `open` although its lines changed, or reports it again. It isn't posted again, and the PR's own comments with our fingerprint marker are checked as well. An open blocking finding keeps blocking under the current policy's filter and blocking rules, wherever it is, so `approve` and `gate` never approve a PR on a delta that left an earlier blocker untouched; `gate` requests changes again. The review body lists the still-open findings with the agent's reasons. When the agent says `open` and the push since the last review changed the finding's lines (the author tried a fix), its thread gets a reply ("Still open in `<sha>`: <reason>") and stays unresolved. The lines are carried from the head the finding was reported against to the last reviewed head through that diff's hunks, then checked against `lastReviewedHead..newHead`, so a later push elsewhere, even in the same file, adds no reply. A finding that can't be followed (commit gone, file deleted or renamed) gets none. A failed reply is a warning.
 
 Fixed and dismissed findings are recorded in the database (`ResolvedByJobId`) and counted in the review summary. Findings that were only in a summary have no thread; they're resolved in the database only.
 

@@ -357,4 +357,21 @@ public sealed class GitRepositoryTests : IDisposable
 
         Assert.Equal([new LineSpan(1, 0), new LineSpan(3, 3)], lines["f.txt"]);
     }
+
+    [Fact]
+    public async Task MapLines_FollowsTheCodeToTheNewerRevision()
+    {
+        _source.Write("f.txt", "1", "2", "3", "4", "5");
+        var from = _source.Commit("base");
+        _source.Write("f.txt", "0", "1", "2", "THREE", "4", "5");
+        var to = _source.Commit("change");
+        _source.Git("rm", "--quiet", "f.txt");
+        var gone = _source.Commit("delete");
+        var repo = await CacheAsync();
+
+        Assert.Equal(new LineSpan(6, 6), await repo.MapLinesAsync(from, to, "f.txt", new LineSpan(5, 5), Ct));
+        Assert.Equal(new LineSpan(4, 4), await repo.MapLinesAsync(from, to, "f.txt", new LineSpan(3, 3), Ct));
+        Assert.Equal(new LineSpan(5, 5), await repo.MapLinesAsync(to, to, "f.txt", new LineSpan(5, 5), Ct));
+        Assert.Null(await repo.MapLinesAsync(to, gone, "f.txt", new LineSpan(1, 1), Ct));
+    }
 }

@@ -117,6 +117,14 @@ public sealed class GitRepository : IGitRepository
         return DiffParser.ParseOldChangedLines(patch);
     }
 
+    public async Task<LineSpan?> MapLinesAsync(string fromSha, string toSha, string path, LineSpan lines, CancellationToken ct)
+    {
+        var patch = await RunAsync(
+            ["-c", "core.quotePath=false", "diff", "--unified=0", "--no-color", "--no-ext-diff", "--no-renames", fromSha, toSha, "--", ":(literal)" + path],
+            ct).ConfigureAwait(false);
+        return DiffParser.MapSpan(patch, lines);
+    }
+
     public async Task<bool> HasCommitAsync(string sha, CancellationToken ct) =>
         (await RunRawAsync(["cat-file", "-e", $"{sha}^{{commit}}"], null, ct).ConfigureAwait(false)).ExitCode == 0;
 

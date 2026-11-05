@@ -53,6 +53,17 @@ public class FindingsJsonTests
     }
 
     [Fact]
+    public void Deserialize_ReadsEarlierFindingVerdicts()
+    {
+        var report = FindingsJson.Deserialize(ValidReport.Replace("\"summary\": \"One issue.\",", """
+            "summary": "One issue.",
+            "earlierFindings": [{ "id": "abc", "status": "fixed", "reason": "Guarded now." }],
+            """, StringComparison.Ordinal));
+
+        Assert.Equal(new EarlierFindingCheck("abc", EarlierFindingStatus.Fixed, "Guarded now."), Assert.Single(report.EarlierFindings!));
+    }
+
+    [Fact]
     public void Deserialize_WithoutTheStructuredSummary_LeavesItNull()
     {
         var report = FindingsJson.Deserialize(ValidReport);

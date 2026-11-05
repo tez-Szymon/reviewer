@@ -239,6 +239,9 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
         await EnsureSuccessAsync(resolve, ct).ConfigureAwait(false);
     }
 
+    public Task ReplyToCommentAsync(PullRequestRef pr, PublishedComment comment, string note, CancellationToken ct) =>
+        PostAsync($"{MergeRequestPath(pr)}/discussions/{Uri.EscapeDataString(comment.ProviderId)}/notes", new NoteRequest(CommentFormatter.Note(note)), ct);
+
     public async Task MergeAsync(PullRequestRef pr, MergeOptions options, CancellationToken ct)
     {
         // The merge method is the project's setting; only squashing can be chosen per merge.

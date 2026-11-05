@@ -119,6 +119,66 @@ internal static partial class DiffParser
         return result;
     }
 
+    /// <summary>
+    /// Where <paramref name="span"/> of a file's older revision is in its newer one, from that file's
+    /// <c>git diff --unified=0</c> output. Lines in a changed hunk map to the hunk's new lines. Null when the file was
+    /// deleted; the span unchanged when the patch is empty.
+    /// </summary>
+    public static LineSpan? MapSpan(string patch, LineSpan span)
+    {
+        var hunks = new List<(int OldStart, int OldCount, int NewStart, int NewCount)>();
+        var inHunks = false;
+        foreach (var line in patch.Split('\n'))
+        {
+            if (!inHunks && line.StartsWith("+++ ", StringComparison.Ordinal) && Path(line[4..], "b/") is null)
+            {
+                return null;
+            }
+
+            if (line.StartsWith("@@ ", StringComparison.Ordinal))
+            {
+                inHunks = true;
+                var match = FullHunkHeader().Match(line);
+                if (!match.Success)
+                {
+                    throw new GitException($"Unexpected hunk header: {line}");
+                }
+
+                static int Count(Group g) => g.Success ? int.Parse(g.Value, CultureInfo.InvariantCulture) : 1;
+                hunks.Add((
+                    int.Parse(match.Groups["os"].Value, CultureInfo.InvariantCulture), Count(match.Groups["oc"]),
+                    int.Parse(match.Groups["ns"].Value, CultureInfo.InvariantCulture), Count(match.Groups["nc"])));
+            }
+        }
+
+        var start = Map(span.Start, first: true);
+        var end = Map(span.End, first: false);
+        return new LineSpan(start, Math.Max(start, end));
+
+        int Map(int line, bool first)
+        {
+            var offset = 0;
+            foreach (var (oldStart, oldCount, newStart, newCount) in hunks)
+            {
+                // A pure insertion after line n ("-n,0") leaves lines up to n where they were.
+                if (oldCount == 0 ? line <= oldStart : line < oldStart)
+                {
+                    return line + offset;
+                }
+
+                if (oldCount > 0 && line < oldStart + oldCount)
+                {
+                    // Changed: the code is now the hunk's new lines; a pure deletion leaves the line after it.
+                    return newCount == 0 ? newStart + 1 : first ? newStart : newStart + newCount - 1;
+                }
+
+                offset += newCount - oldCount;
+            }
+
+            return line + offset;
+        }
+    }
+
     private static LineSpan OldSpan(string header)
     {
         var match = OldHunkHeader().Match(header);
@@ -276,4 +336,7 @@ internal static partial class DiffParser
 
     [GeneratedRegex(@"^@@ -(?<start>\d+)(?:,(?<count>\d+))? \+\d+(?:,\d+)? @@")]
     private static partial Regex OldHunkHeader();
+
+    [GeneratedRegex(@"^@@ -(?<os>\d+)(?:,(?<oc>\d+))? \+(?<ns>\d+)(?:,(?<nc>\d+))? @@")]
+    private static partial Regex FullHunkHeader();
 }

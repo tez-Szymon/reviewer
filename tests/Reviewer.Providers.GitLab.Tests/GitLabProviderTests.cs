@@ -307,6 +307,17 @@ public class GitLabProviderTests
     }
 
     [Fact]
+    public async Task Reply_AddsANoteToTheDiscussion_WithoutResolvingIt()
+    {
+        var gitlab = new FakeGitLab().On($"POST {Mr}/discussions/d1/notes", "{}", HttpStatusCode.Created);
+
+        await gitlab.Provider().ReplyToCommentAsync(Pr, new PublishedComment("d1", "fp-1", "src/Foo.cs", 10), "Still open in abc.", Ct);
+
+        Assert.Equal("Still open in abc.", gitlab.Body($"POST {Mr}/discussions/d1/notes").GetProperty("body").GetString());
+        Assert.Equal([$"POST {Mr}/discussions/d1/notes"], gitlab.Routes);
+    }
+
+    [Fact]
     public async Task Resolve_AlreadyResolved_LeavesItAlone()
     {
         var gitlab = new FakeGitLab()

@@ -142,6 +142,21 @@ public class CommentFormatterTests
     }
 
     [Fact]
+    public void StillOpen_ListsEachFinding_WithTheAgentsReason_KeptInsideItsSection()
+    {
+        var text = CommentFormatter.StillOpen([
+            (Comment("Null deref").Finding, "Still read before the check </details> @bob"),
+            (Comment("Naming").Finding, null),
+        ]);
+
+        Assert.StartsWith("<details>\n<summary><b>Still open from earlier reviews</b> (2)</summary>", text, StringComparison.Ordinal);
+        Assert.Contains("- **minor · style** `a.cs:1` Null deref: Still read before the check &lt;/details> @​bob", text, StringComparison.Ordinal);
+        Assert.Contains("- **minor · style** `a.cs:1` Naming\n", text, StringComparison.Ordinal);
+        Assert.Equal(2, text.Split("</details>").Length);
+        Assert.Equal("", CommentFormatter.StillOpen([]));
+    }
+
+    [Fact]
     public void ReviewBody_PutsDetailsAfterTheListedFindings()
     {
         var body = CommentFormatter.ReviewBody("## ✅", [Comment().Finding], "<details>x</details>");

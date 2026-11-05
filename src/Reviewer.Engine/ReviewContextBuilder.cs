@@ -93,6 +93,10 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
     /// <param name="jobId">From <see cref="NewJobId"/>; names the job folder.</param>
     /// <param name="plan">From <see cref="PlanAsync"/>; the PR must not be <see cref="DeltaKind.Unchanged"/>.</param>
     /// <param name="tokenOwner">Login of the account that will publish the review, for the self-PR rule.</param>
+    /// <param name="earlier">
+    /// Findings from earlier reviews that are still open, listed in <c>context.json</c> for the agent to check against
+    /// the head. Their fingerprint is their id.
+    /// </param>
     /// <exception cref="GitException">The snapshot's head is no longer reachable (force-pushed since the snapshot was taken).</exception>
     public async Task<PreparedReview> PrepareAsync(
         string jobId,
@@ -101,7 +105,8 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         string tokenOwner,
         InstructionSettings instructions,
         TimeSpan timeout,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<OpenFinding>? earlier = null)
     {
         var pr = snapshot.Ref;
         var delta = plan.Delta;
@@ -134,7 +139,8 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
                 new DeltaJson(delta.FromSha, snapshot.HeadSha, JsonNamingPolicy.KebabCaseLower.ConvertName(delta.Kind.ToString()), delta.Reason),
                 snapshot.IsDraft,
                 snapshot.Labels,
-                [.. changed.Select(f => new ChangedFileJson(f.Path, [.. f.Lines.Select(l => new LineSpanJson(l.Start, l.End))]))]);
+                [.. changed.Select(f => new ChangedFileJson(f.Path, [.. f.Lines.Select(l => new LineSpanJson(l.Start, l.End))]))],
+                [.. (earlier ?? []).Select(EarlierFindingJson.From)]);
 
             await Write(attempt, ContextFile, JsonSerializer.Serialize(context, JsonOptions), ct).ConfigureAwait(false);
             await Write(attempt, DeltaFile, patch, ct).ConfigureAwait(false);
@@ -176,6 +182,50 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
             touched.UnionWith(group
                 .Where(o => changed.TryGetValue(o.Finding.File, out var spans) && spans.Any(s => s.Overlaps(o.Finding.StartLine, o.Finding.EndLine)))
                 .Select(o => o.Fingerprint));
+        }
+
+        return touched;
+    }
+
+    /// <summary>
+    /// Fingerprints of <paramref name="open"/> findings whose lines changed between <paramref name="since"/> (the last
+    /// reviewed head) and <paramref name="head"/>: what the latest push touched. Each finding's lines are first carried
+    /// from the head it was reported against to <paramref name="since"/>. One that can't be followed there (a commit
+    /// gone, the file deleted or renamed) counts as untouched.
+    /// </summary>
+    public async Task<IReadOnlySet<string>> FindTouchedSinceAsync(
+        IReadOnlyList<OpenFinding> open, string? since, string head, CancellationToken ct)
+    {
+        var touched = new HashSet<string>(StringComparer.Ordinal);
+        if (open.Count == 0 || since is null || !await git.HasCommitAsync(since, ct).ConfigureAwait(false))
+        {
+            return touched;
+        }
+
+        var changed = await git.ChangedOldLinesAsync(since, head, ct).ConfigureAwait(false);
+        foreach (var o in open)
+        {
+            if (!changed.TryGetValue(o.Finding.File, out var spans))
+            {
+                continue;
+            }
+
+            var lines = new LineSpan(o.Finding.StartLine, o.Finding.EndLine);
+            if (!string.Equals(o.HeadSha, since, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!await git.HasCommitAsync(o.HeadSha, ct).ConfigureAwait(false)
+                    || await git.MapLinesAsync(o.HeadSha, since, o.Finding.File, lines, ct).ConfigureAwait(false) is not { } mapped)
+                {
+                    continue;
+                }
+
+                lines = mapped;
+            }
+
+            if (spans.Any(s => s.Overlaps(lines.Start, lines.End)))
+            {
+                touched.Add(o.Fingerprint);
+            }
         }
 
         return touched;
@@ -253,11 +303,36 @@ public sealed class ReviewContextBuilder(IGitRepository git, ReviewerPaths paths
         DeltaJson Delta,
         bool IsDraft,
         IReadOnlyList<string> Labels,
-        IReadOnlyList<ChangedFileJson> ChangedFiles);
+        IReadOnlyList<ChangedFileJson> ChangedFiles,
+        IReadOnlyList<EarlierFindingJson> EarlierFindings);
 
     private sealed record DeltaJson(string From, string To, string Kind, string Reason);
 
     private sealed record ChangedFileJson(string Path, IReadOnlyList<LineSpanJson> Lines);
 
     private sealed record LineSpanJson(int Start, int End);
+
+    /// <param name="ReportedAt">The head it was reported against; its lines refer to that commit, not the current head.</param>
+    private sealed record EarlierFindingJson(
+        string Id,
+        string File,
+        int StartLine,
+        int EndLine,
+        string ReportedAt,
+        string Severity,
+        string Category,
+        string Title,
+        string Body)
+    {
+        public static EarlierFindingJson From(OpenFinding o) => new(
+            o.Fingerprint,
+            o.Finding.File,
+            o.Finding.StartLine,
+            o.Finding.EndLine,
+            o.HeadSha,
+            o.Finding.Severity.ToString().ToLowerInvariant(),
+            o.Finding.Category.ToString().ToLowerInvariant(),
+            o.Finding.Title,
+            o.Finding.Body);
+    }
 }
