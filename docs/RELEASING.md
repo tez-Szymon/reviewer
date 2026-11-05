@@ -21,7 +21,7 @@ The release has, per runtime:
 
 ## Signing
 
-Without these secrets the packages are built unsigned: macOS Gatekeeper refuses to open the installer and the app (since macOS 15, right-click → Open no longer gets past it; the user has to try once, then press Open Anyway in System Settings → Privacy & Security, or clear the quarantine with `xattr -dr com.apple.quarantine`), and Windows SmartScreen warns (More info → Run anyway). Set them under the repository's Settings → Secrets and variables → Actions.
+Without these secrets the packages are built unsigned, except that the macOS app is signed ad hoc (`codesign -s -`). Without even that, a downloaded copy is reported as "damaged and can't be opened", with no way past it short of `xattr`. Ad hoc or unsigned, macOS Gatekeeper refuses to open the installer and the app (since macOS 15, right-click → Open no longer gets past it; the user has to try once, then press Open Anyway in System Settings → Privacy & Security, or clear the quarantine with `xattr -dr com.apple.quarantine`), and Windows SmartScreen warns (More info → Run anyway). Set them under the repository's Settings → Secrets and variables → Actions.
 
 **macOS** needs an Apple Developer Program membership.
 

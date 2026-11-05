@@ -64,7 +64,11 @@ case "$rid" in
         args+=(--keychain "$MACOS_KEYCHAIN")
       fi
     else
-      echo "warning: MACOS_SIGN_APP_IDENTITY isn't set; the app is neither signed nor notarized, and Gatekeeper will refuse it." >&2
+      # Signed ad hoc ("-"), so the bundle's signature is at least whole. Unsigned, only the executable carries the
+      # linker's ad-hoc signature, the bundle doesn't match it, and a downloaded copy is reported as damaged with no
+      # way past it. Ad hoc, Gatekeeper only can't verify the developer, and Open Anyway gets past that.
+      args+=(--signAppIdentity -)
+      echo "warning: MACOS_SIGN_APP_IDENTITY isn't set; the app is signed ad hoc and not notarized, so Gatekeeper asks before opening it." >&2
     fi
     ;;
   win-*)
