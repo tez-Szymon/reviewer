@@ -6,6 +6,8 @@
     <AssemblyName>Reviewer.Desktop</AssemblyName>
     <RootNamespace>Reviewer.Desktop</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The executable's icon on Windows. The macOS bundle's comes from app.icns, which eng/package.sh passes to vpk. -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <!-- UI code resumes on the UI thread after awaiting; ConfigureAwait(false) would be the bug here. -->
     <NoWarn>$(NoWarn);CA2007</NoWarn>
   </PropertyGroup>
@@ -15,8 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The tray icons: a template for the macOS menu bar, which tints it, and a coloured one for Windows. -->
-    <AvaloniaResource Include="Assets\**" />
+    <!-- The tray icons: a template for the macOS menu bar, which tints it, and a coloured one for Windows; and the
+         window icon. The .icns and .ico are for the packages, not the app, so they stay out of the assembly.
+         eng/icons/make-icons.sh regenerates the app icons. -->
+    <AvaloniaResource Include="Assets\**" Exclude="Assets\*.icns;Assets\*.ico" />
   </ItemGroup>
 
   <ItemGroup>
