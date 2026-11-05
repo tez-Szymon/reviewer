@@ -32,6 +32,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     [ObservableProperty]
     private string? _preferencesProblem;
 
+    /// <summary>Light, dark, or as the OS is; saved in <c>desktop.json</c>.</summary>
+    [ObservableProperty]
+    private Appearance _appearance;
+
     /// <summary>The app starts, in the background, when the user logs in.</summary>
     [ObservableProperty]
     private bool _startAtLogin;
@@ -55,7 +59,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
         _client = client;
         Engine = engine;
         _settings = settings;
-        _keepEngineRunning = settings.Load().KeepEngineRunning;
+        var preferences = settings.Load();
+        _keepEngineRunning = preferences.KeepEngineRunning;
+        _appearance = preferences.Appearance;
         _updater = updater;
         Updates = new UpdatesViewModel(updater);
         _loginItem = loginItem;
@@ -114,6 +120,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     public QueueViewModel Queue { get; }
 
     public UpdatesViewModel Updates { get; }
+
+    public static IReadOnlyList<Appearance> Appearances { get; } = Enum.GetValues<Appearance>();
 
     /// <summary>
     /// Start at login is offered on macOS and Windows, to an installed app: a development build would register the
@@ -228,7 +236,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
         }
     }
 
-    partial void OnKeepEngineRunningChanged(bool value) => PreferencesProblem = _settings.Save(new DesktopPreferences(value));
+    partial void OnKeepEngineRunningChanged(bool value) => SavePreferences();
+
+    partial void OnAppearanceChanged(Appearance value) => SavePreferences();
+
+    private void SavePreferences() =>
+        PreferencesProblem = _settings.Save(new DesktopPreferences(KeepEngineRunning, Appearance));
 
     partial void OnStartAtLoginChanged(bool value)
     {

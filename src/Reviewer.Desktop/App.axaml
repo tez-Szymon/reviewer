@@ -5,7 +5,7 @@
              x:Class="Reviewer.Desktop.App"
              Name="Reviewer"
              RequestedThemeVariant="Default">
-  <!-- RequestedThemeVariant Default: light or dark as the OS is, switching when it does. -->
+  <!-- RequestedThemeVariant Default: light or dark as the OS is, switching when it does. Settings › Appearance can pin one (App.ApplyAppearance). -->
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>

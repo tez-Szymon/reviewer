@@ -1,10 +1,20 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Reviewer.Desktop.Services;
 
+/// <summary>Light or dark, or whichever the OS is in.</summary>
+internal enum Appearance
+{
+    System,
+    Light,
+    Dark,
+}
+
 /// <summary>The app's own preferences, as <c>desktop.json</c> in the data folder holds them.</summary>
 /// <param name="KeepEngineRunning">Quitting leaves an engine the app started running, so reviews go on without the window.</param>
-internal sealed record DesktopPreferences(bool KeepEngineRunning = false);
+/// <param name="Appearance">Light or dark; System follows the OS, switching when it does.</param>
+internal sealed record DesktopPreferences(bool KeepEngineRunning = false, Appearance Appearance = Appearance.System);
 
 /// <summary>
 /// Reads and writes <c>desktop.json</c>. These are the app's preferences, not the engine's policy, so they stay out of
@@ -14,7 +24,11 @@ internal sealed class DesktopSettings(string path)
 {
     public const string FileName = "desktop.json";
 
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     public string Path { get; } = path;
 
