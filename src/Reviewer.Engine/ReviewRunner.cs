@@ -199,13 +199,17 @@ public sealed class ReviewRunner(IRepositoryProvider provider, ReviewContextBuil
         if (published)
         {
             var head = prepared.Scope.ReviewedHeadSha;
+            var reReview = delta.Kind != DeltaKind.Full;
+            var footer = Footer(delta, head, fixedFingerprints.Count, dismissed.Count, stillOpen.Count, plan.OpenBlockingFindings.Count);
+            var details = CommentFormatter.Details(considered, reReview);
             var result = new ReviewResult(
-                $"{plan.Summary}\n\n{Footer(delta, head, fixedFingerprints.Count, dismissed.Count, stillOpen.Count, plan.OpenBlockingFindings.Count)}",
+                CommentFormatter.Headline(considered with { Summary = plan.Summary }, [.. plan.InlineFindings, .. plan.SummaryFindings], reReview),
                 [.. plan.InlineFindings.Select(f => new InlineComment(f, fingerprints[f]))],
                 plan.SummaryFindings,
                 plan.Decision,
                 head)
             {
+                Details = details.Length > 0 ? $"{details}\n\n{footer}" : footer,
                 WithdrawApproval = plan.WithdrawApproval,
             };
             await provider.PublishReviewAsync(pr, result, ct).ConfigureAwait(false);

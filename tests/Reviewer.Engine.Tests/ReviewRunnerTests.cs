@@ -70,10 +70,27 @@ public sealed class ReviewRunnerTests : IDisposable
         Assert.Equal("in", comment.Finding.Id);
         Assert.Equal(FindingFingerprint.Compute(comment.Finding, "TWO"), comment.Fingerprint);
         Assert.Equal("outside", Assert.Single(published.SummaryFindings).Id);
-        Assert.StartsWith("Looks risky.", published.Summary, StringComparison.Ordinal);
-        Assert.Contains("with fake", published.Summary, StringComparison.Ordinal);
+        Assert.StartsWith("## ⚠️ 2 findings: 2 major", published.Summary, StringComparison.Ordinal);
+        Assert.Contains("Looks risky.", published.Summary, StringComparison.Ordinal);
+        Assert.Contains("with fake", published.Details, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(outcome.AttemptFolder!, ReviewRunner.PlanFile)));
         Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(outcome.AttemptFolder!)!, "worktree-1")));
+    }
+
+    [Fact]
+    public async Task Run_PublishesTheWalkthroughCollapsed_BeforeTheFooter()
+    {
+        var report = new FindingsReport("Adds a picker.", [], new ReviewRisk(RiskLevel.Low, "Desktop only."),
+            [new ChangeArea("Settings UI", "New picker")], ["Old files load"], ["Runtime visuals"]);
+        var (runner, provider, request) = await SetUpAsync(report);
+
+        await runner.RunAsync(request, Ct);
+
+        var published = Assert.Single(provider.Published);
+        Assert.Equal("## ✅ No issues found · Risk: low\n\nAdds a picker.\n\n**Risk:** Desktop only.", published.Summary);
+        Assert.StartsWith("<details>\n<summary><b>Changes</b> · 1 area</summary>", published.Details, StringComparison.Ordinal);
+        Assert.Contains("<summary><b>Not verified</b> (1): Runtime visuals</summary>", published.Details, StringComparison.Ordinal);
+        Assert.EndsWith("with fake.</sub>", published.Details, StringComparison.Ordinal);
     }
 
     [Theory]
