@@ -25,6 +25,16 @@ internal sealed class PullItem(WatchedPullRequestDto pr)
         { } last => $"reviewed {Describe.Short(last.HeadSha)} {Describe.Time(last.ReviewedAt)}",
     };
 
+    /// <summary>Green when the last review covers the head, amber when commits came after it.</summary>
+    public Tone ReviewTone => Pr.LastReview switch
+    {
+        null => Tone.Neutral,
+        { } last when !string.Equals(last.HeadSha, Pr.HeadSha, StringComparison.OrdinalIgnoreCase) => Tone.Warning,
+        _ => Tone.Success,
+    };
+
+    public Tone LatestJobTone => Pr.LatestJob is { } latest ? Describe.Tone(latest.Job) : Tone.Neutral;
+
     public string LatestJobText => Pr.LatestJob is { } latest ? Describe.State(latest.Job) : "";
 
     public bool HasJob => Pr.LatestJob is not null;

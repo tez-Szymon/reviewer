@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 using Reviewer.Desktop.Services;
 using Velopack;
 
@@ -29,5 +30,10 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .UseInter()
             .LogToTrace();
+
+    /// <summary>Inter, bundled, as the app's font: the same on every OS, and what the design is drawn in.</summary>
+    public static AppBuilder UseInter(this AppBuilder builder) =>
+        builder.WithInterFont().With(new FontManagerOptions { DefaultFamilyName = "fonts:Inter#Inter" });
 }

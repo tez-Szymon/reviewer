@@ -2,6 +2,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Reviewer.Api;
+using Reviewer.Core.Findings;
 using Reviewer.Desktop.Services;
 using Reviewer.Engine;
 using Reviewer.Engine.Config;
@@ -15,6 +16,21 @@ internal sealed class FindingItem(FindingDto finding)
     public FindingDto Finding { get; } = finding;
 
     public string Heading => $"{Finding.Severity.ToString().ToLowerInvariant()} · {Finding.Category.ToString().ToLowerInvariant()} · {Finding.Confidence.ToString("0.00", CultureInfo.InvariantCulture)}";
+
+    public string SeverityText => Finding.Severity.ToString();
+
+    /// <summary>Blockers red, major amber, minor blue, nits grey.</summary>
+    public Tone SeverityTone => Finding.Severity switch
+    {
+        Severity.Blocker => Tone.Danger,
+        Severity.Major => Tone.Warning,
+        Severity.Minor => Tone.Accent,
+        _ => Tone.Neutral,
+    };
+
+    public string CategoryText => Finding.Category.ToString().ToLowerInvariant();
+
+    public string ConfidenceText => $"{Math.Round(Finding.Confidence * 100).ToString(CultureInfo.InvariantCulture)}% confidence";
 
     public string Location => Finding.StartLine == Finding.EndLine
         ? $"{Finding.File}:{Finding.StartLine.ToString(CultureInfo.InvariantCulture)}"
@@ -45,7 +61,7 @@ internal sealed class FindingItem(FindingDto finding)
 internal sealed partial class JobDetailViewModel(IEngineClient client, IShell shell, string jobId) : PageViewModel
 {
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Heading), nameof(StateText), nameof(DeltaText), nameof(HasAttemptFolder))]
+    [NotifyPropertyChangedFor(nameof(Heading), nameof(StateText), nameof(Tone), nameof(DeltaText), nameof(HasAttemptFolder))]
     [NotifyCanExecuteChangedFor(nameof(OpenFolderCommand))]
     private JobDto? _job;
 
@@ -66,6 +82,8 @@ internal sealed partial class JobDetailViewModel(IEngineClient client, IShell sh
     public string Heading => Job is { } job ? $"{Describe.Pr(job.Repo, job.Number)} · {job.AgentId}" : JobId;
 
     public string StateText => Job is { } job ? Describe.State(job) : "";
+
+    public Tone Tone => Job is { } job ? Describe.Tone(job) : Tone.Neutral;
 
     /// <summary>What part of the PR was reviewed.</summary>
     public string DeltaText => Job switch

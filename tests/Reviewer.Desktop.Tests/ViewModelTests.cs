@@ -1,4 +1,5 @@
 using Reviewer.Api;
+using Reviewer.Core.Findings;
 using Reviewer.Core.Policy;
 using Reviewer.Core.Providers;
 using Reviewer.Desktop.Services;
@@ -172,6 +173,87 @@ public class ViewModelTests
         var link = JobDetailViewModel.Link(job, [new AccountDto("a", provider, new Uri(accountHost), null)]);
 
         Assert.Equal(expected, link?.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task Queue_Badge_CountsTheJobs_AndIsNullWhenEmpty()
+    {
+        var queue = new QueueViewModel(_engine, _shell);
+        var changes = new List<string?>();
+        queue.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
+        await queue.LoadAsync();
+        Assert.Null(queue.Badge);
+
+        queue.OnChanged(Job("a", JobState.Running, 1));
+        queue.OnChanged(Job("b", JobState.Queued, 2));
+
+        Assert.Equal("2", queue.Badge);
+        Assert.Contains(nameof(QueueViewModel.Badge), changes);
+        queue.OnChanged(Job("a", JobState.Succeeded, 3));
+        queue.OnChanged(Job("b", JobState.Cancelled, 4));
+        Assert.Null(queue.Badge);
+    }
+
+    [Theory]
+    [InlineData(JobState.Queued, null, null, Tone.Neutral)]
+    [InlineData(JobState.Running, null, null, Tone.Accent)]
+    [InlineData(JobState.Throttled, null, null, Tone.Warning)]
+    [InlineData(JobState.Failed, null, null, Tone.Danger)]
+    [InlineData(JobState.Skipped, null, null, Tone.Neutral)]
+    [InlineData(JobState.Cancelled, null, null, Tone.Neutral)]
+    [InlineData(JobState.Succeeded, ReviewDecision.Approve, null, Tone.Success)]
+    [InlineData(JobState.Succeeded, ReviewDecision.RequestChanges, null, Tone.Warning)]
+    [InlineData(JobState.Succeeded, null, null, Tone.Accent)]
+    [InlineData(JobState.Succeeded, ReviewDecision.None, MergeIntent.None, Tone.Accent)]
+    [InlineData(JobState.Succeeded, ReviewDecision.Approve, MergeIntent.MergeWhenGreen, Tone.Success)]
+    public void Tone_ColoursAJob_ByItsStateAndOutcome(JobState state, ReviewDecision? decision, MergeIntent? merge, Tone expected)
+    {
+        var job = Job("a", state, 1) with { Decision = decision, Merge = merge };
+
+        Assert.Equal(expected, Describe.Tone(job));
+        Assert.Equal(expected, new JobItem(job).Tone);
+    }
+
+    [Fact]
+    public void JobItem_Tone_FollowsTheJob()
+    {
+        var item = new JobItem(Job("a", JobState.Running, 1));
+        var changes = new List<string?>();
+        item.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
+
+        item.Update(Job("a", JobState.Failed, 2));
+
+        Assert.Equal(Tone.Danger, item.Tone);
+        Assert.Contains(nameof(JobItem.Tone), changes);
+    }
+
+    [Theory]
+    [InlineData(Severity.Blocker, Tone.Danger)]
+    [InlineData(Severity.Major, Tone.Warning)]
+    [InlineData(Severity.Minor, Tone.Accent)]
+    [InlineData(Severity.Nit, Tone.Neutral)]
+    public void Finding_SeverityTone_RunsFromRedToGrey(Severity severity, Tone expected)
+    {
+        var finding = new FindingItem(new FindingDto(
+            "f", severity, Category.Security, 0.876, "a.cs", 1, 1, "t", "b", null, FindingDisposition.Inline, false, null, null));
+
+        Assert.Equal(expected, finding.SeverityTone);
+        Assert.Equal(severity.ToString(), finding.SeverityText);
+        Assert.Equal("security", finding.CategoryText);
+        Assert.Equal("88% confidence", finding.ConfidenceText);
+    }
+
+    [Fact]
+    public void Pull_ReviewTone_IsGreenWhenCurrent_AmberWithNewCommits_GreyUnreviewed()
+    {
+        var last = new LastReviewDto("abc1234", "base", DateTimeOffset.UnixEpoch, "j");
+        var latest = new JobSummaryDto(Job("j", JobState.Failed, 1), 0, 0, 0);
+
+        Assert.Equal(Tone.Success, new PullItem(Pull(1, "ABC1234", last, null)).ReviewTone);
+        Assert.Equal(Tone.Warning, new PullItem(Pull(1, "def5678", last, null)).ReviewTone);
+        Assert.Equal(Tone.Neutral, new PullItem(Pull(1, "def5678", null, null)).ReviewTone);
+        Assert.Equal(Tone.Danger, new PullItem(Pull(1, "def5678", null, latest)).LatestJobTone);
+        Assert.Equal(Tone.Neutral, new PullItem(Pull(1, "def5678", null, null)).LatestJobTone);
     }
 
     private static WatchedPullRequestDto Pull(int number, string head, LastReviewDto? last, JobSummaryDto? latest, bool matched = true) =>

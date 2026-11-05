@@ -1,34 +1,81 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Reviewer.Desktop.ViewModels"
+             xmlns:c="using:Reviewer.Desktop.Controls"
              x:Class="Reviewer.Desktop.Views.PullsView"
              x:DataType="vm:PullsViewModel">
   <DockPanel>
-    <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12">
-      <DockPanel>
-        <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshCommand}" />
-        <TextBlock Classes="title" Text="Pull requests" />
-      </DockPanel>
-      <TextBlock Classes="muted" TextWrapping="Wrap"
-                 Text="Open PRs in the watched repos, as reviewer serve last polled them; drafts and others the trigger filters skip aren't listed." />
-      <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
-    </StackPanel>
-    <ListBox x:Name="List" ItemsSource="{Binding Pulls}">
-      <ListBox.ItemTemplate>
-        <DataTemplate x:DataType="vm:PullItem">
-          <Grid ColumnDefinitions="3*,2*,2*,Auto" ColumnSpacing="12">
-            <StackPanel VerticalAlignment="Center">
-              <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-              <TextBlock TextTrimming="CharacterEllipsis" Text="{Binding Title}" />
-              <TextBlock Classes="muted" FontSize="12" Text="{Binding Author}" />
-            </StackPanel>
-            <TextBlock Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap" Text="{Binding ReviewText}" />
-            <TextBlock Grid.Column="2" VerticalAlignment="Center" Classes="muted" TextWrapping="Wrap" Text="{Binding LatestJobText}" />
-            <Button Grid.Column="3" Content="Latest review" IsEnabled="{Binding HasJob}"
-                    Command="{Binding #List.((vm:PullsViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}" />
-          </Grid>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
+    <Grid DockPanel.Dock="Top" Classes="pageHeader" ColumnDefinitions="*,Auto" ColumnSpacing="24">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="display" Text="Pull requests" />
+        <TextBlock Classes="subtitle"
+                   Text="Open PRs in the watched repos, as reviewer serve last polled them; drafts and others the trigger filters skip aren't listed." />
+      </StackPanel>
+      <StackPanel Grid.Column="1" Classes="toolbar">
+        <Button Command="{Binding RefreshCommand}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <c:Icon Data="{StaticResource Icon.RefreshCw}" />
+            <TextBlock Text="Refresh" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </Grid>
+
+    <Border DockPanel.Dock="Top" Classes="banner danger" Margin="0,0,0,16"
+            IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+        <c:Icon Data="{StaticResource Icon.CircleAlert}" />
+        <TextBlock Grid.Column="1" Text="{Binding Error}" />
+      </Grid>
+    </Border>
+
+    <Border Classes="card flush" VerticalAlignment="Top">
+      <Panel>
+        <ProgressBar Classes="loading" VerticalAlignment="Top" IsVisible="{Binding Loading}" />
+
+        <StackPanel Classes="empty">
+          <StackPanel.IsVisible>
+            <MultiBinding Converter="{x:Static BoolConverters.And}">
+              <Binding Path="!Pulls.Count" />
+              <Binding Path="!Loading" />
+            </MultiBinding>
+          </StackPanel.IsVisible>
+          <Border Classes="emptyIcon"><c:Icon Data="{StaticResource Icon.GitPullRequest}" /></Border>
+          <TextBlock Classes="strong" Text="No open pull requests" />
+          <TextBlock Classes="caption" Text="Open PRs in the repos you watch show up here after the next poll. Add repos in Repos." />
+        </StackPanel>
+
+        <ListBox x:Name="List" Classes="rows" ItemsSource="{Binding Pulls}" IsVisible="{Binding Pulls.Count}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:PullItem">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="16">
+                <StackPanel Spacing="3" VerticalAlignment="Center">
+                  <TextBlock Classes="strong" TextTrimming="CharacterEllipsis" Text="{Binding Title}" />
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Classes="caption" Text="{Binding Name}" />
+                    <TextBlock Classes="caption" Text="·" />
+                    <c:Icon Width="12" Height="12" Data="{StaticResource Icon.User}"
+                            Foreground="{DynamicResource Text.Tertiary}" VerticalAlignment="Center" />
+                    <TextBlock Classes="caption" Text="{Binding Author}" />
+                  </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center" HorizontalAlignment="Right">
+                  <c:Badge HorizontalAlignment="Right" ShowDot="True" Text="{Binding ReviewText}" Tone="{Binding ReviewTone}" />
+                  <TextBlock Classes="caption" HorizontalAlignment="Right" IsVisible="{Binding HasJob}"
+                             Text="{Binding LatestJobText, StringFormat='Latest job: {0}'}" />
+                </StackPanel>
+                <Button Grid.Column="2" Classes="ghost" IsEnabled="{Binding HasJob}" VerticalAlignment="Center"
+                        Command="{Binding #List.((vm:PullsViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Latest review" />
+                    <c:Icon Data="{StaticResource Icon.ChevronRight}" />
+                  </StackPanel>
+                </Button>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Panel>
+    </Border>
   </DockPanel>
 </UserControl>

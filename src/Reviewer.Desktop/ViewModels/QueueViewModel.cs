@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CommunityToolkit.Mvvm.Input;
 using Reviewer.Api;
 using Reviewer.Desktop.Services;
@@ -21,7 +22,11 @@ internal sealed partial class QueueViewModel : PageViewModel
         _shell = shell;
 
         // An updated job is taken out and put back in order, so every change to the queue passes through here.
-        _jobs.Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(Activity));
+        _jobs.Items.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(Activity));
+            OnPropertyChanged(nameof(Badge));
+        };
     }
 
     /// <summary>What the queue holds, in a few words: "1 reviewing, 2 queued", or "idle".</summary>
@@ -41,6 +46,9 @@ internal sealed partial class QueueViewModel : PageViewModel
     }
 
     public override string Title => "Queue";
+
+    /// <summary>How many jobs wait or run, while there are any.</summary>
+    public override string? Badge => Jobs.Count > 0 ? Jobs.Count.ToString(CultureInfo.InvariantCulture) : null;
 
     public ObservableCollection<JobItem> Jobs => _jobs.Items;
 
