@@ -70,6 +70,17 @@
               <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" VerticalAlignment="Center"
                             IsChecked="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).KeepEngineRunning}" />
             </Grid>
+            <Separator />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="strong" Text="Appearance" />
+                <TextBlock Classes="caption" TextWrapping="Wrap"
+                           Text="Light or dark. System follows your OS, switching when it does." />
+              </StackPanel>
+              <ComboBox Grid.Column="1" MinWidth="140" VerticalAlignment="Center"
+                        ItemsSource="{x:Static vm:MainWindowViewModel.Appearances}"
+                        SelectedItem="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Appearance}" />
+            </Grid>
             <Separator IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CanStartAtLogin}" />
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20"
                   IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CanStartAtLogin}">

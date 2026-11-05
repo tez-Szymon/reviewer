@@ -70,6 +70,23 @@ public sealed class TrayTests : IDisposable
     }
 
     [Fact]
+    public void Appearance_IsRemembered_WithTheOtherPreferences()
+    {
+        using (var first = Window(new FakeLauncher(_engine)))
+        {
+            Assert.Equal(Appearance.System, first.Appearance);
+            first.KeepEngineRunning = true;
+            first.Appearance = Appearance.Light;
+            Assert.Null(first.PreferencesProblem);
+        }
+
+        Assert.Contains("\"light\"", File.ReadAllText(SettingsPath), StringComparison.OrdinalIgnoreCase);
+        using var second = Window(new FakeLauncher(_engine));
+        Assert.Equal(Appearance.Light, second.Appearance);
+        Assert.True(second.KeepEngineRunning);
+    }
+
+    [Fact]
     public void Preferences_ThatCantBeRead_AreTheDefaults()
     {
         File.WriteAllText(SettingsPath, "{ not json");

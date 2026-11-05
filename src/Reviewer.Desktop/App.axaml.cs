@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Reviewer.Api;
 using Reviewer.Desktop.Services;
@@ -40,6 +41,14 @@ internal sealed partial class App : Application
                 async uri => await window.Launcher.LaunchUriAsync(uri),
                 async folder => await window.Launcher.LaunchDirectoryInfoAsync(new DirectoryInfo(folder)));
             window.DataContext = model;
+            ApplyAppearance(model.Appearance);
+            model.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MainWindowViewModel.Appearance))
+                {
+                    ApplyAppearance(model.Appearance);
+                }
+            };
             var running = false;
             window.Opened += (_, _) =>
             {
@@ -88,6 +97,14 @@ internal sealed partial class App : Application
 
         base.OnFrameworkInitializationCompleted();
     }
+
+    /// <summary>Light or dark everywhere; Default follows the OS, switching when it does.</summary>
+    private void ApplyAppearance(Appearance appearance) => RequestedThemeVariant = appearance switch
+    {
+        Appearance.Light => ThemeVariant.Light,
+        Appearance.Dark => ThemeVariant.Dark,
+        _ => ThemeVariant.Default,
+    };
 
     /// <summary>
     /// Closing the window hides it to the tray, so the engine the app follows (and may have started) goes on reviewing.

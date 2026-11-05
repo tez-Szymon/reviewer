@@ -1,5 +1,5 @@
 <!--
-  The design tokens: colours for light and dark (the OS picks), and the sizes every screen shares. Views use these
+  The design tokens: colours for light and dark (the OS picks, unless Settings › Appearance does), and the sizes every screen shares. Views use these
   keys only, never a literal colour, so a change here restyles the whole app.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
