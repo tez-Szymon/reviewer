@@ -131,3 +131,9 @@ jobs:
               --channel "$rid" --outputDir "$dir" --tag "$GITHUB_REF_NAME" --releaseName "Reviewer ${GITHUB_REF_NAME#v}" \
               --merge --publish "${pre[@]}"
           done
+
+      # vpk uploads only the files it built; the macOS disk images go up beside them.
+      - name: Upload disk images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" artifacts/releases/release-*/*.dmg --clobber --repo "$GITHUB_REPOSITORY"

@@ -14,6 +14,7 @@ The release has, per runtime:
 | File | |
 |---|---|
 | `Reviewer-<rid>-Setup.pkg` | macOS installer |
+| `Reviewer-<rid>.dmg` | macOS disk image: drag the app to Applications. It updates like the `.pkg` install. Built by `eng/package.sh` with `hdiutil`, not by `vpk`, so the workflow uploads it separately; signed, notarized and stapled when the macOS secrets are set |
 | `Reviewer-win-x64-Setup.exe` | Windows installer, per user, no admin rights |
 | `Reviewer-<rid>-Portable.zip` | The app without an installer |
 | `Reviewer-<version>-<rid>-full.nupkg`, `releases.<rid>.json`, `assets.<rid>.json`, `RELEASES-<rid>` | What the update check reads; don't remove them |
