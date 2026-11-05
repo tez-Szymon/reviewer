@@ -47,6 +47,15 @@ public interface IGitRepository
 
     /// <summary>Stable patch-id per commit SHA in <paramref name="range"/>, used to match commits across rebases.</summary>
     Task<IReadOnlyDictionary<string, string>> PatchIdsAsync(string range, CancellationToken ct);
+
+    /// <summary>
+    /// Commits every file under <paramref name="directory"/> as a commit on <paramref name="parent"/>, without
+    /// touching any ref or the user's config. Author, committer and date are fixed, so the same files, parent and
+    /// message always give the same SHA.
+    /// </summary>
+    /// <param name="parent">Null for a root commit.</param>
+    /// <returns>The new commit's SHA.</returns>
+    Task<string> CommitDirectoryAsync(string directory, string? parent, string message, CancellationToken ct);
 }
 
 /// <summary>An inclusive range of line numbers in the newer revision.</summary>

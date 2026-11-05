@@ -1,0 +1,14 @@
+# A real change from this repo: 1a6ab83, fixed later in b4e2505. A large diff, so this case costs more than the fixtures.
+title: Record every review in a local SQLite database
+description: |
+  Adds reviewer.db (EF Core, SQLite) with Jobs, Findings and PullRequests tables. ReviewRunner writes the job before
+  reading the snapshot and records success, failure, throttling or cancellation. The job id is created before the
+  review; a second run of a PR in the same second gets a -2 suffix instead of colliding. Adds reviewer history and
+  reviewer show.
+repo: https://github.com/tez-Szymon/reviewer.git
+base: 3a2c99f3700697294c3ea8e157c1a030b16fad38
+head: 1a6ab83d107fd831db828039ae5aa22ca4f6cc0f
+bugs:
+  - file: src/Reviewer.Engine/State/ReviewStore.cs
+    lines: 70-72
+    about: Any SQLite constraint error (code 19) is taken for a duplicate job id and retried with a new suffix, so NOT NULL or foreign key failures are retried 98 times and then hidden; only SQLITE_CONSTRAINT_PRIMARYKEY (1555) means the id exists.

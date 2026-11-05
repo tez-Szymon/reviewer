@@ -1,0 +1,6 @@
+title: Default and validate the config
+description: Fills in the data folder and port when the file leaves them out, and rejects out-of-range values.
+bugs:
+  - file: config/load.go
+    lines: 35-36
+    about: The error from validate is assigned and then dropped; Load returns the invalid config with a nil error.

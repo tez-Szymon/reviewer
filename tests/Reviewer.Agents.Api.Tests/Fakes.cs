@@ -74,6 +74,8 @@ internal sealed class FakeGit(Dictionary<string, string> files) : IGitRepository
     public Task<bool> IsAncestorAsync(string ancestorSha, string descendantSha, CancellationToken ct) => throw new NotSupportedException();
 
     public Task<IReadOnlyDictionary<string, string>> PatchIdsAsync(string range, CancellationToken ct) => throw new NotSupportedException();
+
+    public Task<string> CommitDirectoryAsync(string directory, string? parent, string message, CancellationToken ct) => throw new NotSupportedException();
 }
 
 /// <summary>A worktree and an attempt folder with the inputs a review reads, deleted afterwards.</summary>

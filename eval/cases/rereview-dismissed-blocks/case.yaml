@@ -1,0 +1,13 @@
+# A real change from this repo: 749baef, fixed later in ae29f38.
+title: Resolve fixed findings' threads, and honour threads people resolve
+description: |
+  After a published re-review, each fixed finding's thread gets a reply and is resolved. A finding whose thread a
+  person resolved is dismissed: it stops blocking, even if the agent reports it again, isn't posted again, and is
+  marked resolved in the database.
+repo: https://github.com/tez-Szymon/reviewer.git
+base: b3e9e62153d9f22a9ca68870fdd2931e6a8e6d42
+head: 749baef16a0d526cc03ef127cdeb269c6399c1e3
+bugs:
+  - file: src/Reviewer.Engine/ReviewRunner.cs
+    lines: 151-153
+    about: Reported findings are filtered against dismissed open findings, but once a review records the dismissal the finding is no longer open, so a later review (--full, say) that reports it again lets it block. It should check the resolved threads on the PR.

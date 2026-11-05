@@ -1,0 +1,6 @@
+title: Cache exchange rates
+description: Each price lookup fetched the rate again; the rate cache now keeps one per currency.
+bugs:
+  - file: src/Rates/RateCache.cs
+    lines: 6-17
+    about: RateCache is a singleton used by concurrent requests, and Dictionary isn't safe for concurrent writes; it needs ConcurrentDictionary or a lock.

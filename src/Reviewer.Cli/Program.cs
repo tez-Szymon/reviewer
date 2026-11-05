@@ -10,6 +10,7 @@ using Reviewer.Core.Agents;
 using Reviewer.Core.Providers;
 using Reviewer.Engine;
 using Reviewer.Engine.Config;
+using Reviewer.Engine.Eval;
 using Reviewer.Engine.State;
 using Reviewer.Git;
 
@@ -488,7 +489,94 @@ watch.SetAction(async (parse, ct) =>
     }
 });
 
-var root = new RootCommand("Local-first AI code reviewer") { review, queue, serve, watch, history, showJob, status, configCommand };
+var evalCases = new Argument<string>("cases")
+{
+    Description = "Folder of eval cases, one folder with a case.yaml each",
+    DefaultValueFactory = _ => Path.Combine("eval", "cases"),
+};
+var evalOnly = new Option<string[]>("--case") { Description = "Run only this case (its folder name); repeat for more", AllowMultipleArgumentsPerToken = true };
+var evalAgent = new Option<string?>("--agent") { Description = "Agent to use instead of the configured one" };
+var evalModel = new Option<string?>("--model") { Description = "Model for the agent; overrides the config" };
+var evalCommand = new Command("eval", "Review a set of changes with known bugs, score what the agent catches, and compare with the last run")
+{
+    evalCases, evalOnly, evalAgent, evalModel,
+};
+evalCommand.SetAction(async (parse, ct) =>
+{
+    if (await LoadConfigAsync(paths, ct) is not { } config)
+    {
+        return 1;
+    }
+
+    IReadOnlyList<EvalCase> cases;
+    try
+    {
+        cases = await EvalCaseLoader.LoadAsync(parse.GetValue(evalCases)!, ct);
+    }
+    catch (ConfigException e)
+    {
+        return Fail(e.Message);
+    }
+
+    var only = parse.GetValue(evalOnly) ?? [];
+    if (only.FirstOrDefault(id => cases.All(c => c.Id != id)) is { } unknown)
+    {
+        return Fail($"No case '{unknown}'; the cases are: {string.Join(", ", cases.Select(c => c.Id))}.");
+    }
+
+    var selected = only.Length == 0 ? cases : [.. cases.Where(c => only.Contains(c.Id))];
+    var agentId = parse.GetValue(evalAgent) ?? config.Agents.Default;
+    if (!AgentsConfig.Known.Contains(agentId))
+    {
+        return Fail($"Unknown agent '{agentId}'; use one of: {string.Join(", ", AgentsConfig.Known)}.");
+    }
+
+    // The global settings: an eval measures the agent and the instructions everyone gets, not one repo's overrides.
+    var settings = config.Agents.Get(agentId);
+    settings = settings with { Model = parse.GetValue(evalModel) ?? settings.Model };
+    var evalPaths = new ReviewerPaths(paths.Evals);
+    var evalRunner = new EvalRunner(
+        evalPaths,
+        git => ReviewFactory.Agent(agentId, settings, runner, git),
+        config.Defaults.ToReviewPolicy(),
+        await config.Defaults.Instructions.LoadAsync(paths, home, ct),
+        settings.Timeout,
+        TimeProvider.System);
+
+    var started = DateTimeOffset.UtcNow;
+    var model = settings.Model is { } m ? $" ({m})" : "";
+    Console.Error.WriteLine($"Running {selected.Count} case(s) with {agentId}{model}; each is a full review and can take several minutes...");
+    var results = new List<EvalCaseResult>();
+    var complete = selected.Count == cases.Count;
+    try
+    {
+        foreach (var evalCase in selected)
+        {
+            var result = await evalRunner.RunAsync(evalCase, ct);
+            results.Add(result);
+            EvalPrinter.PrintCase(result, Console.Out);
+        }
+    }
+    catch (AgentThrottledException e)
+    {
+        // Later cases would hit the same limit; keep what ran.
+        complete = false;
+        Console.Error.WriteLine(e.RetryAt is { } at ? $"{e.Message}\nStopped; try again after {at.ToLocalTime():g}." : $"{e.Message}\nStopped.");
+        if (results.Count == 0)
+        {
+            return 1;
+        }
+    }
+
+    var run = new EvalRun(
+        agentId, settings.Model, ReviewStore.AppVersion, started, complete, [.. results.Select(EvalCaseRecord.From)]);
+    var previous = await EvalResults.FindPreviousAsync(evalPaths.EvalResults, run, ct);
+    var saved = await EvalResults.SaveAsync(evalPaths.EvalResults, run, ct);
+    EvalPrinter.PrintRun(run, previous is null ? null : EvalResults.Compare(previous, run), saved, Console.Out);
+    return run.Failed > 0 ? 1 : 0;
+});
+
+var root = new RootCommand("Local-first AI code reviewer") { review, queue, serve, watch, history, showJob, status, configCommand, evalCommand };
 
 // Stopping the engine cancels running reviews and queues them again; give that time before the process is ended.
 return await root.Parse(args).InvokeAsync(new InvocationConfiguration { ProcessTerminationTimeout = TimeSpan.FromSeconds(30) });

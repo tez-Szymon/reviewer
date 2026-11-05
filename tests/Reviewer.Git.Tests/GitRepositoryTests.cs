@@ -18,6 +18,33 @@ public sealed class GitRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task CommitDirectory_CommitsEveryFile_WithTheSameShaEachTime()
+    {
+        var before = Directory.CreateDirectory(_source.NewDirectory("before")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(before, "a.txt"), "one\n", Ct);
+        var after = Directory.CreateDirectory(_source.NewDirectory("after/src")).Parent!.FullName;
+        await File.WriteAllTextAsync(Path.Combine(after, "a.txt"), "two\n", Ct);
+        await File.WriteAllTextAsync(Path.Combine(after, "src", "b.txt"), "new\n", Ct);
+        // Ignored files are part of the commit too: every file in the directory is.
+        await File.WriteAllTextAsync(Path.Combine(after, ".gitignore"), "*.log\n", Ct);
+        await File.WriteAllTextAsync(Path.Combine(after, "build.log"), "kept\n", Ct);
+        var repo = await GitRepository.OpenOrInitAsync(_source.NewDirectory("cache.git"), Ct);
+
+        var first = await repo.CommitDirectoryAsync(before, null, "Before", Ct);
+        var second = await repo.CommitDirectoryAsync(after, first, "After", Ct);
+
+        Assert.Equal(first, await repo.CommitDirectoryAsync(before, null, "Before", Ct));
+        Assert.Equal(second, await repo.CommitDirectoryAsync(after, first, "After", Ct));
+        Assert.Equal("one\n", await repo.ReadFileAsync(first, "a.txt", Ct));
+        Assert.Equal("new\n", await repo.ReadFileAsync(second, "src/b.txt", Ct));
+        Assert.Equal("kept\n", await repo.ReadFileAsync(second, "build.log", Ct));
+        Assert.Equal(first, await repo.MergeBaseAsync(first, second, Ct));
+        Assert.Equal(
+            [".gitignore", "a.txt", "build.log", "src/b.txt"],
+            (await repo.ChangedFilesAsync(first, second, Ct)).Select(f => f.Path).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public async Task OpenOrInit_IsIdempotent()
     {
         var path = _source.NewDirectory("cache.git");
