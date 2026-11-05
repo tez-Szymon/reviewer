@@ -147,7 +147,7 @@ public class GitLabProviderTests
     [Fact]
     public async Task GetChangedFiles_CountsLinesFromTheDiffs()
     {
-        var gitlab = new FakeGitLab().On($"GET {Mr}/diffs?per_page=100", $$"""
+        var gitlab = new FakeGitLab().On($"GET {Mr}/diffs?per_page=30", $$"""
             [
               { "old_path": "src/Old.cs", "new_path": "src/Foo.cs", "diff": "{{Diff}}", "deleted_file": false },
               { "old_path": "gone.txt", "new_path": "gone.txt", "diff": "@@ -1,2 +0,0 @@\n-a\n-b\n", "deleted_file": true },
