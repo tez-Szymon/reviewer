@@ -34,6 +34,8 @@ internal sealed partial class App : Application
                 client,
                 new EngineConnection(client, new EngineLauncher(paths)),
                 new DesktopSettings(Path.Combine(paths.Root, DesktopSettings.FileName)),
+                new VelopackUpdater(),
+                LoginItem.ForThisOs(),
                 action => Dispatcher.UIThread.Post(action),
                 async uri => await window.Launcher.LaunchUriAsync(uri),
                 async folder => await window.Launcher.LaunchDirectoryInfoAsync(new DirectoryInfo(folder)));
@@ -47,7 +49,19 @@ internal sealed partial class App : Application
                     _ = model.RunAsync(start: true);
                 }
             };
-            desktop.MainWindow = window;
+
+            // Started at login: only the tray and the engine, until the window is asked for.
+            if (HasTray && desktop.Args?.Contains(LoginItem.Background) == true)
+            {
+                running = true;
+                _ = model.RunAsync(start: true);
+            }
+            else
+            {
+                desktop.MainWindow = window;
+            }
+
+            model.StartUpdateChecks();
 
             // Stop an engine the app started before the process goes; the lifetime waits for nothing on its own.
             var stopped = false;
@@ -108,6 +122,17 @@ internal sealed partial class App : Application
         };
         keepRunning.Click += (_, _) => model.KeepEngineRunning = !model.KeepEngineRunning;
 
+        var startAtLogin = new NativeMenuItem("Start at login")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = model.StartAtLogin,
+            IsVisible = model.CanStartAtLogin,
+        };
+        startAtLogin.Click += (_, _) => model.StartAtLogin = !model.StartAtLogin;
+
+        var update = new NativeMenuItem("Restart to update") { IsVisible = model.Updates.IsReady };
+        update.Click += (_, _) => model.RestartToUpdateCommand.Execute(null);
+
         var open = new NativeMenuItem("Open Reviewer");
         open.Click += (_, _) => Show();
         var quit = new NativeMenuItem("Quit Reviewer");
@@ -118,7 +143,7 @@ internal sealed partial class App : Application
             Icon = new WindowIcon(AssetLoader.Open(new Uri(
                 OperatingSystem.IsMacOS() ? "avares://Reviewer.Desktop/Assets/tray-template.png" : "avares://Reviewer.Desktop/Assets/tray.png"))),
             ToolTipText = model.TrayText,
-            Menu = [open, new NativeMenuItemSeparator(), keepRunning, new NativeMenuItemSeparator(), quit],
+            Menu = [open, update, new NativeMenuItemSeparator(), keepRunning, startAtLogin, new NativeMenuItemSeparator(), quit],
         };
 
         // The menu bar tints a template icon for light and dark, as it does its own.
@@ -134,6 +159,17 @@ internal sealed partial class App : Application
                 case nameof(MainWindowViewModel.KeepEngineRunning):
                     keepRunning.IsChecked = model.KeepEngineRunning;
                     break;
+                case nameof(MainWindowViewModel.StartAtLogin):
+                    startAtLogin.IsChecked = model.StartAtLogin;
+                    break;
+            }
+        };
+        model.Updates.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(UpdatesViewModel.IsReady))
+            {
+                update.Header = model.Updates.IsReady ? $"Restart to update to {model.Updates.ReadyVersion}" : "Restart to update";
+                update.IsVisible = model.Updates.IsReady;
             }
         };
         TrayIcon.SetIcons(this, [tray]);

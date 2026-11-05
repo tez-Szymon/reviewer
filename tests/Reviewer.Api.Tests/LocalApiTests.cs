@@ -531,9 +531,10 @@ public sealed class LocalApiTests : IAsyncLifetime, IDisposable
         await _store.EnqueueAsync(Job("old"), Ct);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
-        await using var events = _client.WatchJobsAsync(after: null, opened: null, timeout.Token).GetAsyncEnumerator(timeout.Token);
+        var opened = new TaskCompletionSource();
+        await using var events = _client.WatchJobsAsync(after: null, opened: opened.SetResult, timeout.Token).GetAsyncEnumerator(timeout.Token);
         var next = events.MoveNextAsync();
-        await Task.Delay(200, Ct); // Let the stream pick its starting point before anything changes.
+        await opened.Task.WaitAsync(timeout.Token); // The stream's starting point is fixed once it's open.
 
         // Another store on the same file, as the CLI would write.
         var cli = await ReviewStore.OpenAsync(_paths.Database, TimeProvider.System, Ct);

@@ -20,6 +20,12 @@ internal interface IEngineLauncher
     string LogPath { get; }
 
     IEngineProcess Start();
+
+    /// <summary>
+    /// The running engine with this process id, if it's the CLI beside the app: an update replaces it, so it must be
+    /// stopped first, wherever it was started.
+    /// </summary>
+    IEngineProcess? FindBundled(int processId);
 }
 
 internal sealed class EngineLaunchException(string message) : Exception(message);
@@ -57,6 +63,39 @@ internal sealed class EngineLauncher(ReviewerPaths paths) : IEngineLauncher
             throw new EngineLaunchException($"Couldn't start {cli}: {e.Message}");
         }
     }
+
+    public IEngineProcess? FindBundled(int processId)
+    {
+        Process? process = null;
+        try
+        {
+            process = Process.GetProcessById(processId);
+            var path = process.MainModule?.FileName;
+            if (path is not null && SamePath(path, Path.Combine(AppContext.BaseDirectory, CliName)))
+            {
+                var found = new ChildProcess(process);
+                process = null;
+                return found;
+            }
+
+            return null;
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            // Gone, or not ours to look at.
+            return null;
+        }
+        finally
+        {
+            process?.Dispose();
+        }
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(
+            Path.GetFullPath(a),
+            Path.GetFullPath(b),
+            OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
 
     private static string? FindCli()
     {

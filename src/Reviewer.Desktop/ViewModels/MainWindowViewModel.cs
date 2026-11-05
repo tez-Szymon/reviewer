@@ -19,6 +19,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     private readonly Func<string, Task> _openFolder;
     private readonly Stack<PageViewModel> _back = new();
     private readonly DesktopSettings _settings;
+    private readonly IAppUpdater _updater;
+    private readonly ILoginItem? _loginItem;
+    private readonly CancellationTokenSource _updates = new();
     private CancellationTokenSource _run = new();
 
     /// <summary>Quitting leaves an engine the app started running; saved in <c>desktop.json</c>.</summary>
@@ -28,6 +31,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     /// <summary>Why the app's preferences couldn't be saved.</summary>
     [ObservableProperty]
     private string? _preferencesProblem;
+
+    /// <summary>The app starts, in the background, when the user logs in.</summary>
+    [ObservableProperty]
+    private bool _startAtLogin;
 
     [ObservableProperty]
     private PageViewModel _current;
@@ -39,6 +46,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
         IEngineClient client,
         EngineConnection engine,
         DesktopSettings settings,
+        IAppUpdater updater,
+        ILoginItem? loginItem,
         Action<Action> post,
         Func<Uri, Task> openUri,
         Func<string, Task> openFolder)
@@ -47,6 +56,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
         Engine = engine;
         _settings = settings;
         _keepEngineRunning = settings.Load().KeepEngineRunning;
+        _updater = updater;
+        Updates = new UpdatesViewModel(updater);
+        _loginItem = loginItem;
+        _startAtLogin = CanStartAtLogin && loginItem!.IsEnabled;
         _openUri = openUri;
         _openFolder = openFolder;
         var config = new ConfigDocument(client);
@@ -99,6 +112,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
 
     public QueueViewModel Queue { get; }
 
+    public UpdatesViewModel Updates { get; }
+
+    /// <summary>
+    /// Start at login is offered on macOS and Windows, to an installed app: a development build would register the
+    /// build folder.
+    /// </summary>
+    public bool CanStartAtLogin => _loginItem is not null && _updater.IsInstalled;
+
     /// <summary>The tray icon's tooltip: what the engine is doing, or why there's none.</summary>
     public string TrayText => Engine.IsConnected ? $"Reviewer: {Queue.Activity}" : $"Reviewer: {Engine.Description}";
 
@@ -127,6 +148,22 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
 
     [RelayCommand]
     private Task StartEngineAsync() => RunAsync(start: true);
+
+    /// <summary>Looks for updates in the background, from now until the app quits.</summary>
+    public void StartUpdateChecks() => _ = Updates.RunAsync(_updates.Token);
+
+    /// <summary>
+    /// Stops the engine if it runs from the app's folder, which the update replaces, even when it's kept running;
+    /// then the app exits, the update is applied, and the new version starts, starting the engine again.
+    /// </summary>
+    [RelayCommand]
+    private async Task RestartToUpdateAsync()
+    {
+        await _updates.CancelAsync();
+        await _run.CancelAsync();
+        await Engine.StopForUpdateAsync();
+        _updater.ApplyAndRestart();
+    }
 
     partial void OnSelectedPageChanged(PageViewModel value)
     {
@@ -162,19 +199,43 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
     /// Stops following the engine, and stops the engine if the app started it, unless <see cref="KeepEngineRunning"/>:
     /// then it goes on reviewing, and the app finds it on the socket the next time it starts.
     /// </summary>
+    /// <remarks>
+    /// A downloaded update is applied once the app has exited, unless an engine left running uses the app's folder:
+    /// then it waits for Restart to update.
+    /// </remarks>
     public async Task ShutdownAsync()
     {
+        await _updates.CancelAsync();
         await _run.CancelAsync();
         if (!KeepEngineRunning)
         {
             await Engine.StopAsync();
         }
+
+        if (Updates.IsReady && !Engine.RunsFromApp())
+        {
+            _updater.ApplyOnExit();
+        }
     }
 
     partial void OnKeepEngineRunningChanged(bool value) => PreferencesProblem = _settings.Save(new DesktopPreferences(value));
 
+    partial void OnStartAtLoginChanged(bool value)
+    {
+        if (_loginItem?.Set(value) is { } problem)
+        {
+            PreferencesProblem = problem;
+            StartAtLogin = _loginItem.IsEnabled;
+        }
+        else
+        {
+            PreferencesProblem = null;
+        }
+    }
+
     public void Dispose()
     {
+        _updates.Dispose();
         _run.Dispose();
         Engine.Dispose();
     }
