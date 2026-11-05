@@ -99,6 +99,9 @@ public sealed record ReviewResult(
     ReviewDecision Decision,
     string HeadSha)
 {
+    /// <summary>Text after the findings in the review body: collapsed sections and the footer. Already defused.</summary>
+    public string Details { get; init; } = "";
+
     /// <summary>
     /// The policy wanted to request changes, which the provider can't: an approval this account gave earlier must be
     /// withdrawn, or it would still stand for the blocked head.

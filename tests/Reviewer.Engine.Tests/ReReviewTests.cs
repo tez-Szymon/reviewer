@@ -117,7 +117,7 @@ public sealed class ReReviewTests : IDisposable
         var patch = await File.ReadAllTextAsync(Path.Combine(_agent.Contexts[1].AttemptFolder, ReviewContextBuilder.DeltaFile), Ct);
         Assert.Contains("+later", patch, StringComparison.Ordinal);
         Assert.DoesNotContain("BUG", patch, StringComparison.Ordinal);
-        Assert.Contains("commits pushed since", _provider.Published[1].Summary, StringComparison.Ordinal);
+        Assert.Contains("commits pushed since", _provider.Published[1].Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class ReReviewTests : IDisposable
         Assert.Equal(1, second.StillOpen);
         Assert.Equal(0, second.Resolved);
         Assert.Empty(_provider.Published[1].Comments);
-        Assert.Contains("1 earlier finding(s) still open, 1 blocking", _provider.Published[1].Summary, StringComparison.Ordinal);
+        Assert.Contains("1 earlier finding(s) still open, 1 blocking", _provider.Published[1].Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public sealed class ReReviewTests : IDisposable
         Assert.Equal(1, second.Resolved);
         Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));
         Assert.Equal(second.JobId, (await _store.GetJobAsync(first.JobId, Ct))!.Findings.Single().ResolvedByJobId);
-        Assert.Contains("1 earlier finding(s) fixed", _provider.Published[1].Summary, StringComparison.Ordinal);
+        Assert.Contains("1 earlier finding(s) fixed", _provider.Published[1].Details, StringComparison.Ordinal);
         var (comment, note) = Assert.Single(_provider.Resolutions);
         Assert.Equal("c0", comment.ProviderId);
         Assert.StartsWith($"Fixed in {second.Snapshot.HeadSha[..7]}", note, StringComparison.Ordinal);
@@ -197,7 +197,7 @@ public sealed class ReReviewTests : IDisposable
         Assert.Empty(_provider.Resolutions);
         Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));
         Assert.Equal(FindingDisposition.Dropped, Assert.Single((await _store.GetJobAsync(second.JobId, Ct))!.Findings).Disposition);
-        Assert.Contains("1 dismissed on the PR", _provider.Published[1].Summary, StringComparison.Ordinal);
+        Assert.Contains("1 dismissed on the PR", _provider.Published[1].Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public sealed class ReReviewTests : IDisposable
         Assert.Equal(ReviewDecision.Approve, third.Plan.Decision);
         Assert.Equal((0, 0, 0), (third.Dismissed, third.StillOpen, third.Resolved));
         Assert.Empty(_provider.Published[2].Comments);
-        Assert.DoesNotContain("dismissed on the PR", _provider.Published[2].Summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("dismissed on the PR", _provider.Published[2].Details, StringComparison.Ordinal);
         Assert.Contains(third.Plan.Reasons, r => r.StartsWith("Ignored 1 finding(s) whose thread a person resolved", StringComparison.Ordinal));
         Assert.Equal(FindingDisposition.Dropped, Assert.Single((await _store.GetJobAsync(third.JobId, Ct))!.Findings).Disposition);
         Assert.Empty(await _store.GetOpenFindingsAsync(Pr, Ct));

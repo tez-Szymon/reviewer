@@ -205,7 +205,7 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
 
         listed.AddRange(result.SummaryFindings);
         using (var note = await _http.PostAsJsonAsync(
-            $"{MergeRequestPath(pr)}/notes", new NoteRequest(CommentFormatter.ReviewBody(result.Summary, listed)), Json, ct).ConfigureAwait(false))
+            $"{MergeRequestPath(pr)}/notes", new NoteRequest(CommentFormatter.ReviewBody(result.Summary, listed, result.Details)), Json, ct).ConfigureAwait(false))
         {
             await EnsureSuccessAsync(note, ct).ConfigureAwait(false);
         }

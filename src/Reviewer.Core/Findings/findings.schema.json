@@ -6,6 +6,34 @@
   "required": ["summary", "findings"],
   "properties": {
     "summary": { "type": "string" },
+    "risk": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "reason"],
+          "properties": {
+            "level": { "enum": ["low", "medium", "high"] },
+            "reason": { "type": "string" }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "changes": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["area", "description"],
+        "properties": {
+          "area": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "checked": { "type": ["array", "null"], "items": { "type": "string" } },
+    "notVerified": { "type": ["array", "null"], "items": { "type": "string" } },
     "findings": {
       "type": "array",
       "items": {

@@ -26,4 +26,16 @@ Find the problems a careful senior reviewer would raise before merging. Prefer a
 - `suggestion`: replacement code for exactly those lines, only when you're confident it's right.
 - `severity`: `blocker` breaks production or security; `major` is a real bug or risk that should be fixed before merge; `minor` is worth fixing but not blocking; `nit` is optional polish.
 - `confidence`: how sure you are the problem is real, from 0 to 1. Use lower values for guesses that depend on code you couldn't see.
-- `summary`: two or three sentences on what the change does and its overall risk. If you found nothing worth reporting, say so and return an empty `findings` list.
+- If you found nothing worth reporting, return an empty `findings` list.
+
+## Writing the summary
+
+The summary is posted on the pull request next to the findings. Write it for the author and the human reviewer: plain sentences, no headings, no Markdown tables.
+
+- `summary`: one or two sentences on what the change does and whether it does what the title and description say. Don't list findings here.
+- `risk`: `level` is `low`, `medium` or `high` for the change as a whole, after your findings; `reason` says why in one sentence.
+- `changes`: the change grouped by area, a few entries at most (e.g. `{ "area": "Settings UI", "description": "New appearance picker, applied on change" }`). Group related files; don't list every file.
+- `checked`: what you actually confirmed beyond the findings, as short statements (e.g. "An older desktop.json without the key loads with the default"). Only things you verified by reading code, not things you assumed.
+- `notVerified`: what matters for this change but you couldn't confirm, e.g. runtime or visual behaviour, external services, code you couldn't see. Most important first. Don't list that you didn't build or run tests: no review does. An empty list is fine when nothing is left open.
+
+On a re-review, cover only what `delta.patch` changes in `changes`, `checked` and `notVerified`.

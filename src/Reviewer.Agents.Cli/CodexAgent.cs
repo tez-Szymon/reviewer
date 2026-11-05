@@ -222,7 +222,7 @@ public sealed partial class CodexAgent(CodexOptions options, IProcessRunner runn
     }
 
     // OpenAI's strict structured output needs every property listed as required; optional ones must allow null instead.
-    // The findings schema's only optional property, suggestion, already does.
+    // The findings schema's optional properties (suggestion, and the summary's risk, changes, checked, notVerified) already do.
     internal static string ForCodex(string schema)
     {
         var node = JsonNode.Parse(schema)!.AsObject();

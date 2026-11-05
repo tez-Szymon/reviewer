@@ -36,6 +36,32 @@ public class FindingsJsonTests
     }
 
     [Fact]
+    public void Deserialize_ReadsTheStructuredSummary()
+    {
+        var report = FindingsJson.Deserialize(ValidReport.Replace("\"summary\": \"One issue.\",", """
+            "summary": "One issue.",
+            "risk": { "level": "medium", "reason": "Touches persistence." },
+            "changes": [{ "area": "Settings", "description": "New picker" }],
+            "checked": ["Old files load"],
+            "notVerified": null,
+            """, StringComparison.Ordinal));
+
+        Assert.Equal(new ReviewRisk(RiskLevel.Medium, "Touches persistence."), report.Risk);
+        Assert.Equal(new ChangeArea("Settings", "New picker"), Assert.Single(report.Changes!));
+        Assert.Equal("Old files load", Assert.Single(report.Checked!));
+        Assert.Null(report.NotVerified);
+    }
+
+    [Fact]
+    public void Deserialize_WithoutTheStructuredSummary_LeavesItNull()
+    {
+        var report = FindingsJson.Deserialize(ValidReport);
+
+        Assert.Null(report.Risk);
+        Assert.Null(report.Changes);
+    }
+
+    [Fact]
     public void Serialize_RoundTrips()
     {
         var report = FindingsJson.Deserialize(ValidReport);
