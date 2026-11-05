@@ -152,6 +152,48 @@ public class ViewModelTests
     }
 
     [Fact]
+    public async Task Pulls_ReviewAgain_QueuesTheWholePr_EvenWithNoNewCommits()
+    {
+        var reviewed = new LastReviewDto("aaaaaaa1", "base", DateTimeOffset.UnixEpoch, "j9");
+        _engine.Pulls.AddRange([Pull(7, "aaaaaaa1", reviewed, null), Pull(8, "ccccccc3", null, null)]);
+        var pulls = new PullsViewModel(_engine, _shell);
+        await pulls.LoadAsync();
+
+        await pulls.ReviewAgainCommand.ExecuteAsync(pulls.Pulls[0]);
+
+        Assert.Equal(("Review again", "Review now"), (pulls.Pulls[0].ReviewActionText, pulls.Pulls[1].ReviewActionText));
+        Assert.Equal(["queue https://github.com/acme/api/pull/7 full"], _engine.Calls);
+        Assert.Null(pulls.Error);
+    }
+
+    [Fact]
+    public async Task JobDetail_ReviewAgain_QueuesTheWholePr_AndOpensTheNewJob()
+    {
+        _engine.Details["j1"] = new JobDetailsDto(Job("j1", JobState.Succeeded, 1), [], []);
+        var detail = new JobDetailViewModel(_engine, _shell, "j1");
+        Assert.False(detail.ReviewAgainCommand.CanExecute(null));
+        await detail.LoadAsync();
+
+        await detail.ReviewAgainCommand.ExecuteAsync(null);
+
+        Assert.Equal(["queue https://github.com/acme/api/pull/7 full"], _engine.Calls);
+        Assert.Equal(["open new-job"], _shell.Calls);
+    }
+
+    [Fact]
+    public async Task ReviewAgain_WithNoAccountForTheHost_SaysSo()
+    {
+        _engine.Details["j1"] = new JobDetailsDto(Job("j1", JobState.Succeeded, 1) with { Host = "https://elsewhere.test" }, [], []);
+        var detail = new JobDetailViewModel(_engine, _shell, "j1");
+        await detail.LoadAsync();
+
+        await detail.ReviewAgainCommand.ExecuteAsync(null);
+
+        Assert.Equal("No account is set up for https://elsewhere.test, so acme/api can't be reviewed.", detail.Error);
+        Assert.Empty(_engine.Calls);
+    }
+
+    [Fact]
     public async Task JobDetail_ForAnUnknownJob_SaysSo()
     {
         var detail = new JobDetailViewModel(_engine, _shell, "nope");

@@ -30,6 +30,12 @@
             <TextBlock Text="Job folder" />
           </StackPanel>
         </Button>
+        <Button Command="{Binding ReviewAgainCommand}" ToolTip.Tip="Review the whole PR again, even with no new commits">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <c:Icon Data="{StaticResource Icon.RotateCcw}" />
+            <TextBlock Text="Review again" />
+          </StackPanel>
+        </Button>
         <Button Classes="accent" Command="{Binding OpenPullRequestCommand}">
           <StackPanel Orientation="Horizontal" Spacing="6">
             <c:Icon Data="{StaticResource Icon.ExternalLink}" />

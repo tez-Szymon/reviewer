@@ -62,7 +62,7 @@ internal sealed partial class JobDetailViewModel(IEngineClient client, IShell sh
 {
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Heading), nameof(StateText), nameof(Tone), nameof(DeltaText), nameof(HasAttemptFolder))]
-    [NotifyCanExecuteChangedFor(nameof(OpenFolderCommand))]
+    [NotifyCanExecuteChangedFor(nameof(OpenFolderCommand), nameof(ReviewAgainCommand))]
     private JobDto? _job;
 
     [ObservableProperty]
@@ -123,18 +123,31 @@ internal sealed partial class JobDetailViewModel(IEngineClient client, IShell sh
     /// The PR's page, from the account for the job's host: a GitLab instance may be served from a path, which only its
     /// account knows. Null when no account matches.
     /// </summary>
-    internal static Uri? Link(JobDto job, IReadOnlyList<AccountDto> accounts)
+    internal static Uri? Link(JobDto job, IReadOnlyList<AccountDto> accounts) => Link(job.Host, job.Repo, job.Number, accounts);
+
+    /// <inheritdoc cref="Link(JobDto, IReadOnlyList{AccountDto})"/>
+    internal static Uri? Link(string host, string repo, int number, IReadOnlyList<AccountDto> accounts)
     {
-        var host = new Uri(job.Host);
-        var account = accounts.FirstOrDefault(a => ReviewerConfig.SameHost(a.Host, host));
-        var number = job.Number.ToString(CultureInfo.InvariantCulture);
+        var hostUri = new Uri(host);
+        var account = accounts.FirstOrDefault(a => ReviewerConfig.SameHost(a.Host, hostUri));
+        var n = number.ToString(CultureInfo.InvariantCulture);
         return account switch
         {
             null => null,
-            { Provider: AccountConfig.GitLab } => new Uri($"{account.Host.AbsoluteUri.TrimEnd('/')}/{job.Repo}/-/merge_requests/{number}"),
-            _ => new Uri($"{account.Host.AbsoluteUri.TrimEnd('/')}/{job.Repo}/pull/{number}"),
+            { Provider: AccountConfig.GitLab } => new Uri($"{account.Host.AbsoluteUri.TrimEnd('/')}/{repo}/-/merge_requests/{n}"),
+            _ => new Uri($"{account.Host.AbsoluteUri.TrimEnd('/')}/{repo}/pull/{n}"),
         };
     }
+
+    /// <summary>Reviews the whole PR again, even with no new commits, and shows the new job.</summary>
+    [RelayCommand(CanExecute = nameof(HasJob))]
+    private Task ReviewAgainAsync() => TryAsync(async () =>
+    {
+        var result = await ReviewAgain.QueueAsync(client, Job!.Host, Job.Repo, Job.Number);
+        shell.OpenJob(result.JobId);
+    });
+
+    private bool HasJob() => Job is not null;
 
     [RelayCommand(CanExecute = nameof(HasPullRequestUrl))]
     private Task OpenPullRequestAsync() => shell.OpenUriAsync(PullRequestUrl!);

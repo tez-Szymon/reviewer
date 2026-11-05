@@ -38,6 +38,9 @@ internal sealed class PullItem(WatchedPullRequestDto pr)
     public string LatestJobText => Pr.LatestJob is { } latest ? Describe.State(latest.Job) : "";
 
     public bool HasJob => Pr.LatestJob is not null;
+
+    /// <summary>The button that queues a whole-PR review: a first one, or another of the same head.</summary>
+    public string ReviewActionText => Pr.LastReview is null ? "Review now" : "Review again";
 }
 
 /// <summary>Open PRs in the watched repos as <c>reviewer serve</c> last polled them.</summary>
@@ -102,6 +105,10 @@ internal sealed partial class PullsViewModel(IEngineClient client, IShell shell)
             shell.OpenJob(latest.Job.Id);
         }
     }
+
+    /// <summary>Queues a review of the whole PR, even with no new commits; the row updates as the job's events arrive.</summary>
+    [RelayCommand]
+    private Task ReviewAgainAsync(PullItem pr) => TryAsync(() => ReviewAgain.QueueAsync(client, pr.Pr.Host, pr.Pr.Repo, pr.Pr.Number));
 
     [RelayCommand]
     private Task RefreshAsync() => LoadAsync();
