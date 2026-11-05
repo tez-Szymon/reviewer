@@ -26,6 +26,15 @@ public sealed record ReviewerPaths(string Root)
     /// <summary>Per-job folders: worktree plus numbered attempt folders.</summary>
     public string Jobs => Path.Combine(Root, "jobs");
 
+    /// <summary>
+    /// <c>reviewer eval</c>'s own data folder, laid out like this one: its repositories, job folders and run results
+    /// stay apart from real reviews.
+    /// </summary>
+    public string Evals => Path.Combine(Root, "evals");
+
+    /// <summary>Saved eval runs, one JSON file each, when this is the eval's data folder.</summary>
+    public string EvalResults => Path.Combine(Root, "results");
+
     /// <summary>The engine's bare repository for <paramref name="repo"/>, the source of job worktrees.</summary>
     public string Repository(RepoRef repo) => Path.Combine(Root, "repos", repo.Host.Host, repo.Owner, repo.Name + ".git");
 }

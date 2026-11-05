@@ -163,17 +163,57 @@ public sealed class GitRepository : IGitRepository
             .ToDictionary(parts => parts[1], parts => parts[0]);
     }
 
-    private async Task<string> RunAsync(IReadOnlyList<string> args, CancellationToken ct, string? stdin = null)
+    public async Task<string> CommitDirectoryAsync(string directory, string? parent, string message, CancellationToken ct)
     {
-        var result = await RunRawAsync(args, stdin, ct).ConfigureAwait(false);
+        // A throwaway index, so the repository's own state is untouched; --force adds ignored files too, since every
+        // file in the directory is meant to be in the commit.
+        var index = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"reviewer-index-{Guid.NewGuid():N}");
+        var workTree = System.IO.Path.GetFullPath(directory);
+        var env = new Dictionary<string, string?>
+        {
+            ["GIT_INDEX_FILE"] = index,
+            ["GIT_WORK_TREE"] = workTree,
+            ["GIT_AUTHOR_NAME"] = "Reviewer",
+            ["GIT_AUTHOR_EMAIL"] = "reviewer@localhost",
+            ["GIT_AUTHOR_DATE"] = "2026-01-01T00:00:00Z",
+            ["GIT_COMMITTER_NAME"] = "Reviewer",
+            ["GIT_COMMITTER_EMAIL"] = "reviewer@localhost",
+            ["GIT_COMMITTER_DATE"] = "2026-01-01T00:00:00Z",
+        };
+        try
+        {
+            await RunAsync(["add", "--all", "--force"], ct, environment: env, workingDirectory: workTree).ConfigureAwait(false);
+            var tree = (await RunAsync(["write-tree"], ct, environment: env).ConfigureAwait(false)).Trim();
+            IReadOnlyList<string> parents = parent is null ? [] : ["-p", parent];
+            return (await RunAsync(["commit-tree", tree, .. parents, "-m", message], ct, environment: env).ConfigureAwait(false)).Trim();
+        }
+        finally
+        {
+            File.Delete(index);
+        }
+    }
+
+    private async Task<string> RunAsync(
+        IReadOnlyList<string> args,
+        CancellationToken ct,
+        string? stdin = null,
+        IReadOnlyDictionary<string, string?>? environment = null,
+        string? workingDirectory = null)
+    {
+        var result = await RunRawAsync(args, stdin, ct, environment, workingDirectory).ConfigureAwait(false);
         return result.ExitCode == 0 ? result.StandardOutput : throw Failure(args, result);
     }
 
     private Task<BufferedCommandResult> RunRawAsync(
-        IReadOnlyList<string> args, string? stdin, CancellationToken ct, IReadOnlyDictionary<string, string?>? extraEnvironment = null)
+        IReadOnlyList<string> args,
+        string? stdin,
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string?>? extraEnvironment = null,
+        string? workingDirectory = null)
     {
         var command = Cli.Wrap("git")
             .WithArguments(["--git-dir", Path, .. args])
+            .WithWorkingDirectory(workingDirectory ?? Directory.GetCurrentDirectory())
             .WithEnvironmentVariables(env =>
             {
                 env.Set(Environment);

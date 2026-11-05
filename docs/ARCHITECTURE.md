@@ -483,6 +483,23 @@ Published comments aren't mirrored: each one carries its fingerprint in a hidden
 - The local API listens on a Unix domain socket only, never on TCP, and only its owner can connect.
 - PRs from forks or unknown authors: configurable per repo, default `comment` mode.
 
+## Eval set
+
+Review quality is tracked with an eval set: a fixed set of changes with known bugs (`eval/cases`, see `eval/README.md`). `reviewer eval` reviews each case the way a PR review runs, minus the platform (`Reviewer.Engine.Eval`). Each review uses the same context builder, instruction layers, agent and policy filter. Nothing is published, and nothing is recorded in the review history.
+
+**Cases.** Each case is a folder with a `case.yaml`: a title and description, which the agent sees as the PR's, and the known bugs, each a file, a line range in the head, and what's wrong. A case's change comes from one of two places:
+
+- **A fixture:** `before/` and `after/` folders beside the file. The eval commits them with `git commit-tree` into a throwaway index, with a fixed author and date, so the same files always give the same SHAs.
+- **A real change:** a public repository and two full SHAs, fetched by SHA without credentials.
+
+A case with no bugs measures noise.
+
+**Runs.** Each run uses its own data folder, `evals/` in the reviewer's data folder, laid out like the main one, with repositories and job folders. Every review is a full one: the delta is the whole change from the merge base. The settings are the global ones from `config.yaml`, the agent (or `--agent`, `--model`), `minConfidence`, `ignorePaths` and the instruction layers, never a repo's overrides, so the eval measures what every review gets. Agent and git failures fail only their case. A usage limit stops the run, because every later case would hit it too.
+
+**Scoring.** Scoring counts what a comment-mode review would post: inline findings plus summary findings, after the confidence and path filters. A finding catches a bug when it's in the bug's file and its lines overlap the bug's, give or take 3 lines, since agents anchor on a nearby line. A bug caught by several findings is credited to the most severe one. Findings that match no bug are reported as "other": noise, or a real problem the case doesn't list yet.
+
+**Comparison.** Each run is saved as JSON in `evals/results`: per case, the bugs caught and missed by key (`file:start-end`), the other findings, the count dropped by the filters, the duration and the attempt folder. A run is compared with the latest earlier run that used the same agent and model. The comparison covers only the cases both runs reviewed without an error, so a selection with `--case`, or a case that failed, doesn't read as a regression.
+
 ## MVP milestones
 
 | Milestone | Scope | Exit criterion |

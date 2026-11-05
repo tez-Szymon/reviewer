@@ -1,0 +1,4 @@
+title: Extract the line total from the invoice total
+description: Gross is needed by the invoice view, so it's now a method of its own. No change in behaviour.
+# No bugs: every finding here is noise.
+bugs: []

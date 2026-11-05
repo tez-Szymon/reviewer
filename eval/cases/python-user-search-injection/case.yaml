@@ -1,0 +1,6 @@
+title: Search users by name in the admin
+description: Adds a search box endpoint to the admin, matching any part of the name.
+bugs:
+  - file: app/users.py
+    lines: 15
+    about: The search text is formatted into the SQL, so the q parameter is an SQL injection; it should be a bound parameter.

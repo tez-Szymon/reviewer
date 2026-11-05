@@ -1,0 +1,6 @@
+title: Export orders a page at a time
+description: Large shops ran out of memory exporting orders, so the export now reads 500 orders at a time.
+bugs:
+  - file: src/Export/OrderExport.cs
+    lines: 11-12
+    about: Integer division drops the last, partial page, so up to 499 orders are never exported (and none at all below 500).

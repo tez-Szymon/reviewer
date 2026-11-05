@@ -1,0 +1,6 @@
+title: Save all settings at once
+description: The settings page saves every field with one call and closes when they're stored.
+bugs:
+  - file: src/settings.ts
+    lines: 14-16
+    about: forEach doesn't await the async callbacks, so saveAll resolves before anything is stored and its errors are unhandled rejections the page never sees.

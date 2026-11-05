@@ -1,0 +1,12 @@
+# A real change from this repo: e3d9556, fixed later in 19190eb. A large diff, so this case costs more than the fixtures.
+title: Serve a local API on a Unix socket, with job events over SSE
+description: |
+  reviewer serve hosts an ASP.NET Core minimal API on engine.sock. GET /events streams a 'job' event for each change
+  to a job; the version is the event id, so a client resumes with ?after= or Last-Event-ID without gaps.
+repo: https://github.com/tez-Szymon/reviewer.git
+base: 464489fa21f653775d96558144c5c2dbac9a6f11
+head: e3d9556bbdad8282206dc5b1985325d6c048c0b8
+bugs:
+  - file: src/Reviewer.Api/LocalApi.cs
+    lines: 284-298
+    about: The response headers go out only with the first event, and "now" is read only when the stream is first enumerated, so a client waiting for the stream to open (to load its lists after) waits until some job changes, and a change in between can be missed.
