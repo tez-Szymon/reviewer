@@ -19,4 +19,10 @@ internal sealed class FakeKeychain(Dictionary<string, string> items) : Reviewer.
 {
     public Task<string?> ReadAsync(Reviewer.Engine.Config.TokenReference.Keychain item, CancellationToken ct) =>
         Task.FromResult(items.GetValueOrDefault(item.Target));
+
+    public Task WriteAsync(Reviewer.Engine.Config.TokenReference.Keychain item, string secret, CancellationToken ct)
+    {
+        items[item.Target] = secret;
+        return Task.CompletedTask;
+    }
 }

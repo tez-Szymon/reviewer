@@ -4,12 +4,15 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>reviewer</AssemblyName>
     <RootNamespace>Reviewer.Cli</RootNamespace>
-    <!-- For the generated P/Invoke marshalling of CredReadW in OsKeychain. -->
+    <!-- For the generated P/Invoke marshalling of CredReadW and CredWriteW in OsKeychain. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Reviewer.Cli.Tests" />
+    <!-- The app saves a pasted token with OsKeychain, in its own process: the local API never carries a token. -->
+    <InternalsVisibleTo Include="Reviewer.Desktop" />
+    <InternalsVisibleTo Include="Reviewer.Desktop.Tests" />
   </ItemGroup>
 
   <ItemGroup>

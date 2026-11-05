@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Reviewer.Api;
+using Reviewer.Cli;
 using Reviewer.Desktop.Services;
 using Reviewer.Engine.Config;
 
@@ -33,12 +34,18 @@ internal sealed partial class RepoChoiceItem(string account, RepoChoice choice) 
 
 /// <summary>
 /// The watched repos: add one by URL or by browsing an account, stop watching one, and set a repo's overrides. Every
-/// change is an edit to <c>config.yaml</c> that keeps the rest of the file as it was.
+/// change is an edit to <c>config.yaml</c> that keeps the rest of the file as it was. A URL on a host no account covers
+/// opens <see cref="Connect"/>, which adds the account and then watches the repo.
 /// </summary>
 internal sealed partial class ReposViewModel : PageViewModel
 {
     private readonly IEngineClient _client;
     private readonly ConfigDocument _config;
+    private readonly IKeychain _keychain;
+
+    /// <summary>The account to add for the pasted URL's host; null unless its host is new.</summary>
+    [ObservableProperty]
+    private ConnectAccountViewModel? _connect;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
@@ -69,10 +76,11 @@ internal sealed partial class ReposViewModel : PageViewModel
     [ObservableProperty]
     private IReadOnlyList<string> _accounts = [];
 
-    public ReposViewModel(IEngineClient client, ConfigDocument config)
+    public ReposViewModel(IEngineClient client, ConfigDocument config, IKeychain keychain)
     {
         _client = client;
         _config = config;
+        _keychain = keychain;
         _config.Changed += Rebuild;
     }
 
@@ -105,6 +113,14 @@ internal sealed partial class ReposViewModel : PageViewModel
             return Task.CompletedTask;
         }
 
+        Connect = null;
+        if (RepoUrls.UnknownHost(AddUrl, config.Accounts) is { } host)
+        {
+            Error = null;
+            Connect = new ConnectAccountViewModel(host, config.Accounts.Select(a => a.Id), ConnectAsync, () => Connect = null);
+            return Task.CompletedTask;
+        }
+
         if (RepoUrls.TryParse(AddUrl, config.Accounts, out var account, out var repo) is { } problem)
         {
             Error = problem;
@@ -112,6 +128,83 @@ internal sealed partial class ReposViewModel : PageViewModel
         }
 
         return WatchAsync(account.Id, repo, () => AddUrl = "");
+    }
+
+    /// <summary>
+    /// Saves the pasted token and the account, checks the account signs in, then watches the pasted repo. A token that
+    /// doesn't work leaves the account saved and the form open, to paste another.
+    /// </summary>
+    private async Task ConnectAsync(ConnectAccountViewModel connect)
+    {
+        if (_config.Config is not { } config)
+        {
+            return;
+        }
+
+        var id = connect.Id.Trim();
+        if (id.Length == 0)
+        {
+            connect.Problem = "The account needs an id, such as gitlab.";
+            return;
+        }
+
+        if (!Uri.TryCreate(connect.Host.Trim(), UriKind.Absolute, out var host))
+        {
+            connect.Problem = $"'{connect.Host}' isn't a URL; give it as https://gitlab.example.com.";
+            return;
+        }
+
+        var existing = config.Accounts.Select((a, i) => (Account: a, Index: i)).FirstOrDefault(e => e.Account.Id == id);
+        if (existing.Account is { } other && !ReviewerConfig.SameHost(other.Host, host))
+        {
+            connect.Problem = $"'{id}' is already the account for {other.Host.Authority}; choose another id.";
+            return;
+        }
+
+        connect.Busy = true;
+        connect.Problem = null;
+        try
+        {
+            var token = await AccountSetup.TokenReferenceAsync(_keychain, id, connect.Token);
+            connect.Token = "";
+
+            // Connecting again after a token that didn't work: the account is there, so only its token may change.
+            var edits = existing.Account is null
+                ? AccountSetup.AddEdits(_config.Settings, config, AccountSetup.Entry(id, connect.Provider, host, token))
+                : token is not null && token != existing.Account.Token
+                    ? [new ConfigEdit(ConfigEditOp.Set, $"accounts[{existing.Index}].token", JsonValue.Create(token))]
+                    : [];
+            await _config.SaveAsync(edits);
+
+            var status = await _client.GetAccountStatusAsync(id, CancellationToken.None);
+            if (!status.SignedIn)
+            {
+                connect.Problem = $"Account '{id}' is saved, but it can't sign in: {(status.Problem ?? "not signed in").TrimEnd('.')}. Paste a token and connect again.";
+                return;
+            }
+
+            Connect = null;
+            if (RepoUrls.TryParse(AddUrl, _config.Config!.Accounts, out var account, out var repo) is { } problem)
+            {
+                // The host was given with a path the URL isn't under, or the URL names no repo.
+                Error = $"Connected as {status.Login}, but: {problem}";
+                return;
+            }
+
+            await WatchAsync(account.Id, repo, () => AddUrl = "");
+        }
+        catch (KeychainException e)
+        {
+            connect.Problem = e.Message;
+        }
+        catch (Exception e) when (e is EngineApiException or HttpRequestException or IOException)
+        {
+            connect.Problem = e is EngineApiException ? e.Message : $"Couldn't reach the engine: {e.Message}";
+        }
+        finally
+        {
+            connect.Busy = false;
+        }
     }
 
     [RelayCommand]

@@ -1,6 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Reviewer.Agents.Cli;
 using Reviewer.Api;
+using Reviewer.Cli;
 using Reviewer.Desktop.Services;
 
 namespace Reviewer.Desktop.ViewModels;
@@ -54,8 +56,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
         ILoginItem? loginItem,
         Action<Action> post,
         Func<Uri, Task> openUri,
-        Func<string, Task> openFolder)
+        Func<string, Task> openFolder,
+        IKeychain? keychain = null)
     {
+        keychain ??= new OsKeychain(new CliWrapProcessRunner());
         _client = client;
         Engine = engine;
         _settings = settings;
@@ -73,7 +77,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IShell, ID
         Pages =
         [
             Queue, new PullsViewModel(client, this), new HistoryViewModel(client, this),
-            new ReposViewModel(client, config), new SettingsViewModel(client, config),
+            new ReposViewModel(client, config, keychain), new SettingsViewModel(client, config, keychain),
         ];
         Queue.PropertyChanged += (_, e) =>
         {

@@ -39,10 +39,7 @@ internal static class RepoUrls
                 return $"'{input}' isn't a URL.";
             }
 
-            // A self-hosted GitLab may be served from a path; the account whose path is the longest match wins.
-            var match = accounts
-                .Where(a => ReviewerConfig.SameHost(a.Host, url) && Under(url.AbsolutePath, a.Host.AbsolutePath))
-                .MaxBy(a => a.Host.AbsolutePath.TrimEnd('/').Length);
+            var match = AccountFor(url, accounts);
             if (match is null)
             {
                 return $"No account in the config for {url.Host}; add one in Settings first.";
@@ -75,6 +72,21 @@ internal static class RepoUrls
             ? null
             : $"'{input}' doesn't name a repo; expected {(gitlab ? "group/project" : "owner/name")}.";
     }
+
+    /// <summary>
+    /// The host of <paramref name="input"/> when it's a URL no account covers, so an account for it can be offered;
+    /// null otherwise, including for input that isn't a URL.
+    /// </summary>
+    public static Uri? UnknownHost(string input, IReadOnlyList<AccountConfig> accounts) =>
+        input.Trim() is var text && text.Contains("://", StringComparison.Ordinal)
+        && Uri.TryCreate(text, UriKind.Absolute, out var url) && url.Scheme is "https" or "http" && AccountFor(url, accounts) is null
+            ? new Uri(url.GetLeftPart(UriPartial.Authority))
+            : null;
+
+    // A self-hosted GitLab may be served from a path; the account whose path is the longest match wins.
+    private static AccountConfig? AccountFor(Uri url, IReadOnlyList<AccountConfig> accounts) => accounts
+        .Where(a => ReviewerConfig.SameHost(a.Host, url) && Under(url.AbsolutePath, a.Host.AbsolutePath))
+        .MaxBy(a => a.Host.AbsolutePath.TrimEnd('/').Length);
 
     private static bool Under(string path, string prefix)
     {

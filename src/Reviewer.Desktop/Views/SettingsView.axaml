@@ -101,7 +101,7 @@
             <StackPanel Spacing="2">
               <TextBlock Classes="title" Text="Accounts" />
               <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding ImplicitAccount}"
-                         Text="No accounts in config.yaml, so github.com is used with GITHUB_TOKEN, GH_TOKEN or gh auth login. Adding an account replaces it." />
+                         Text="No accounts in config.yaml, so github.com is used with GITHUB_TOKEN, GH_TOKEN or gh auth login. Adding a GitLab account writes this one out as github, so watched repos keep it." />
             </StackPanel>
             <Border Classes="card flush" BoxShadow="none" IsVisible="{Binding Accounts.Count}">
               <ItemsControl ItemsSource="{Binding Accounts}">
@@ -138,13 +138,14 @@
               <StackPanel Spacing="10">
                 <TextBlock Classes="overline" Text="ADD AN ACCOUNT" />
                 <Grid ColumnDefinitions="140,120,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
-                  <TextBox PlaceholderText="Id, e.g. gh-main" Text="{Binding NewAccountId}" />
+                  <TextBox PlaceholderText="Id (optional)" Text="{Binding NewAccountId}"
+                           ToolTip.Tip="How repos and keychain items name the account. Left empty, it's made from the host." />
                   <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{x:Static vm:SettingsViewModel.Providers}"
                             SelectedItem="{Binding NewProvider}" />
-                  <TextBox Grid.Column="2" PlaceholderText="Host (optional), e.g. https://gitlab.example.com" Text="{Binding NewHost}" />
-                  <TextBox Grid.Row="1" Grid.ColumnSpan="3" Margin="0,0,112,0"
-                           PlaceholderText="Token reference, e.g. keychain:reviewer/gh-main" Text="{Binding NewToken}"
-                           ToolTip.Tip="env:NAME or keychain:SERVICE/ACCOUNT. Never the token itself: add it with the OS's own tool.">
+                  <TextBox Grid.Column="2" PlaceholderText="{Binding HostPlaceholder}" Text="{Binding NewHost}" />
+                  <TextBox Grid.Row="1" Grid.ColumnSpan="3" Margin="0,0,112,0" PasswordChar="•"
+                           PlaceholderText="Paste a token, or a reference: env:NAME or keychain:SERVICE/ACCOUNT" Text="{Binding NewToken}"
+                           ToolTip.Tip="A pasted token is saved in the OS keychain as reviewer/ID; config.yaml only names it.">
                     <TextBox.InnerLeftContent>
                       <c:Icon Data="{StaticResource Icon.KeyRound}" Margin="10,0,0,0" Foreground="{DynamicResource Text.Tertiary}" />
                     </TextBox.InnerLeftContent>
@@ -157,8 +158,18 @@
                     </StackPanel>
                   </Button>
                 </Grid>
-                <TextBlock Classes="caption" TextWrapping="Wrap"
-                           Text="The token is referenced, never stored: env:NAME or keychain:SERVICE/ACCOUNT. Add the token itself with the OS's own tool." />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                  <TextBlock Classes="caption" TextWrapping="Wrap" VerticalAlignment="Center">
+                    <Run Text="{Binding ScopeHint}" />
+                    <Run Text="A pasted token is saved in the OS keychain; config.yaml only names it." />
+                  </TextBlock>
+                  <HyperlinkButton Grid.Column="1" NavigateUri="{Binding TokenPage}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="Create a token" />
+                      <c:Icon Data="{StaticResource Icon.ExternalLink}" />
+                    </StackPanel>
+                  </HyperlinkButton>
+                </Grid>
               </StackPanel>
             </Border>
           </StackPanel>

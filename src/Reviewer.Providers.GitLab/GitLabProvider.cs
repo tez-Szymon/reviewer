@@ -131,7 +131,8 @@ public sealed class GitLabProvider(HttpClient http) : IRepositoryProvider
     public async Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(PullRequestRef pr, CancellationToken ct)
     {
         var files = new List<ChangedFile>();
-        await foreach (var diff in GetPagesAsync<DiffDto>($"{MergeRequestPath(pr)}/diffs?per_page=100", ct).ConfigureAwait(false))
+        // 30 a page, not the 100 the other lists ask for: GitLab 17.5 fails this endpoint with a 500 above 30.
+        await foreach (var diff in GetPagesAsync<DiffDto>($"{MergeRequestPath(pr)}/diffs?per_page=30", ct).ConfigureAwait(false))
         {
             // GitLab leaves the diff out of files it considers too large, so those count as no lines.
             var lines = DiffLines.Parse(diff.Diff);

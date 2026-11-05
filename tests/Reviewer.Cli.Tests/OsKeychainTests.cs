@@ -64,6 +64,64 @@ public class OsKeychainTests
     }
 
     [Fact]
+    public async Task Write_HandsTheSecretOverOnStandardInput_ThenReadsItBack()
+    {
+        if (!UsesTools)
+        {
+            return;
+        }
+
+        var runner = new FakeRunner(new ProcessResult(0, "glpat-abc_1.2\n", ""));
+
+        await new OsKeychain(runner).WriteAsync(Item, "glpat-abc_1.2", Ct);
+
+        Assert.Equal(2, runner.Calls.Count);
+        var write = runner.Calls[0];
+        Assert.DoesNotContain(write.Arguments, a => a.Contains("glpat", StringComparison.Ordinal));
+        Assert.DoesNotContain("glpat", write.ToString(), StringComparison.Ordinal);
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.Equal(["-i"], write.Arguments);
+            Assert.Equal("add-generic-password -U -s \"reviewer\" -a \"gh-main\" -w \"glpat-abc_1.2\"\n", write.StandardInput);
+        }
+        else
+        {
+            Assert.Equal(["store", "--label=reviewer/gh-main", "service", "reviewer", "account", "gh-main"], write.Arguments);
+            Assert.Equal("glpat-abc_1.2", write.StandardInput);
+        }
+    }
+
+    [Fact]
+    public async Task Write_ThatDoesntReadBack_Throws()
+    {
+        if (!UsesTools)
+        {
+            return;
+        }
+
+        // security -i exits 0 even when its command fails; the item then reads back as something else, or not at all.
+        var e = await Assert.ThrowsAsync<KeychainException>(
+            () => new OsKeychain(new FakeRunner(new ProcessResult(0, "", ""))).WriteAsync(Item, "glpat-abc", Ct));
+
+        Assert.Contains("doesn't read back", e.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("glpat abc")]
+    [InlineData("glpat-abc\n")]
+    [InlineData("a\"b")]
+    [InlineData("a\\b")]
+    public async Task Write_RefusesWhatIsntAToken_WithoutRunningAnything(string secret)
+    {
+        var runner = new FakeRunner(new ProcessResult(0, "", ""));
+
+        await Assert.ThrowsAsync<KeychainException>(() => new OsKeychain(runner).WriteAsync(Item, secret, Ct));
+
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public void AddCommand_PromptsForTheTokenInsteadOfTakingIt()
     {
         var command = OsKeychain.AddCommand(Item);
